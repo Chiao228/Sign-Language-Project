@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Data & Features (Large Files)
+processed_npy_*/
+tsl_augmented_features_*/
+tsl_features_*/
+tsl_tracking_*/
+tsl/
+*.npy
+*.xlsx
+*.csv
+
+# Training Outputs & Reports
+train_V*/
+augmentation_reports_*/
+landmark_analysis_*/
+scratch/
+*.png
+analyze_output.txt
+detection_report_*.md
+video_count.md
+
+# Models & Weights
+*.pth
+models/
+
+# System Files
+.DS_Store
+Thumbs.db
+._*
+
+# IDEs
+.vscode/
+.idea/

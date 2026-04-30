@@ -1,0 +1,252 @@
+[
+    {
+        "vocab_id": "謝謝",
+        "word_zh": "謝謝",
+        "video_url": "https://www.youtube.com/watch?v=uq7ea9wMAys"
+    },
+    {
+        "vocab_id": "不客氣",
+        "word_zh": "不客氣",
+        "video_url": "https://www.youtube.com/watch?v=Qw-qcHf0tWw"
+    },
+    {
+        "vocab_id": "幫忙",
+        "word_zh": "幫忙",
+        "video_url": "https://www.youtube.com/watch?v=OdEagSQmGdI"
+    },
+    {
+        "vocab_id": "檢查",
+        "word_zh": "檢查",
+        "video_url": "https://www.youtube.com/watch?v=_NB5Ru1deQE"
+    },
+    {
+        "vocab_id": "高興",
+        "word_zh": "高興",
+        "video_url": "https://www.youtube.com/watch?v=4uECllqnef4"
+    },
+    {
+        "vocab_id": "不可以",
+        "word_zh": "不可以",
+        "video_url": "https://www.youtube.com/watch?v=3ZhWoYUOrAc"
+    },
+    {
+        "vocab_id": "忘記",
+        "word_zh": "忘記",
+        "video_url": "https://www.youtube.com/watch?v=ywL5J_5YJqM"
+    },
+    {
+        "vocab_id": "沒關係",
+        "word_zh": "沒關係",
+        "video_url": "https://www.youtube.com/watch?v=s1ocPISoiyQ"
+    },
+    {
+        "vocab_id": "計程車",
+        "word_zh": "計程車",
+        "video_url": "https://www.youtube.com/watch?v=KRnyJbIhoyA"
+    },
+    {
+        "vocab_id": "記得",
+        "word_zh": "記得",
+        "video_url": "https://www.youtube.com/watch?v=-gTcrhS2LdI"
+    },
+    {
+        "vocab_id": "認真",
+        "word_zh": "認真",
+        "video_url": "https://www.youtube.com/watch?v=uWSd_lYILys"
+    },
+    {
+        "vocab_id": "中午",
+        "word_zh": "中午",
+        "video_url": "https://www.youtube.com/watch?v=EYyT3FSDM9k"
+    },
+    {
+        "vocab_id": "你好",
+        "word_zh": "你好",
+        "video_url": "https://www.youtube.com/watch?v=QpL6QsepkSI"
+    },
+    {
+        "vocab_id": "名字",
+        "word_zh": "名字",
+        "video_url": "https://www.youtube.com/watch?v=Paa0jfijLjg"
+    },
+    {
+        "vocab_id": "喜歡",
+        "word_zh": "喜歡",
+        "video_url": "https://www.youtube.com/watch?v=k1FzS40Fkcc"
+    },
+    {
+        "vocab_id": "媽媽",
+        "word_zh": "媽媽",
+        "video_url": "https://www.youtube.com/watch?v=-NKQPUtsBtI"
+    },
+    {
+        "vocab_id": "明天",
+        "word_zh": "明天",
+        "video_url": "https://www.youtube.com/watch?v=UH2j5xw89q8"
+    },
+    {
+        "vocab_id": "有沒有",
+        "word_zh": "有沒有",
+        "video_url": "https://www.youtube.com/watch?v=e0yuqf9Sdh4"
+    },
+    {
+        "vocab_id": "棒",
+        "word_zh": "棒",
+        "video_url": "https://www.youtube.com/watch?v=4-duJz6AwNI"
+    },
+    {
+        "vocab_id": "爸爸",
+        "word_zh": "爸爸",
+        "video_url": "https://www.youtube.com/watch?v=CDugfm1rtwE"
+    },
+    {
+        "vocab_id": "生氣",
+        "word_zh": "生氣",
+        "video_url": "https://www.youtube.com/watch?v=qQuNhoUfXVA"
+    },
+    {
+        "vocab_id": "蘋果",
+        "word_zh": "蘋果",
+        "video_url": "https://www.youtube.com/watch?v=b0smEvo11aM"
+    },
+    {
+        "vocab_id": "不喜歡",
+        "word_zh": "不喜歡",
+        "video_url": "https://www.youtube.com/watch?v=Nxu3PpIZGy0"
+    },
+    {
+        "vocab_id": "不是",
+        "word_zh": "不是",
+        "video_url": "https://www.youtube.com/watch?v=4-duJz6AwNI"
+    },
+    {
+        "vocab_id": "今天(現在)",
+        "word_zh": "今天(現在)",
+        "video_url": "https://www.youtube.com/watch?v=yVJ8AtJMz4w"
+    },
+    {
+        "vocab_id": "去",
+        "word_zh": "去",
+        "video_url": "https://www.youtube.com/watch?v=HdASAQcLXt4"
+    },
+    {
+        "vocab_id": "可以",
+        "word_zh": "可以",
+        "video_url": "https://www.youtube.com/watch?v=ihUgZfh5mOE"
+    },
+    {
+        "vocab_id": "幾點",
+        "word_zh": "幾點",
+        "video_url": "https://www.youtube.com/watch?v=anrzSSHaNbw"
+    },
+    {
+        "vocab_id": "找",
+        "word_zh": "找",
+        "video_url": "https://www.youtube.com/watch?v=oxX_Vnkni8g"
+    },
+    {
+        "vocab_id": "有",
+        "word_zh": "有",
+        "video_url": "https://www.youtube.com/watch?v=EJjnsgABaE4"
+    },
+    {
+        "vocab_id": "朋友",
+        "word_zh": "朋友",
+        "video_url": "https://www.youtube.com/watch?v=Kbt5b-kj8Fs"
+    },
+    {
+        "vocab_id": "機車",
+        "word_zh": "機車",
+        "video_url": "https://www.youtube.com/watch?v=5-WFsIZl6_w"
+    },
+    {
+        "vocab_id": "飛機",
+        "word_zh": "飛機",
+        "video_url": "https://www.youtube.com/watch?v=DWV-8f-Pg9M"
+    },
+    {
+        "vocab_id": "飲料",
+        "word_zh": "飲料",
+        "video_url": "https://www.youtube.com/watch?v=rxjWAGgjTM4"
+    },
+    {
+        "vocab_id": "休息",
+        "word_zh": "休息",
+        "video_url": "https://www.youtube.com/watch?v=xDNRzqqfWtg"
+    },
+    {
+        "vocab_id": "公車",
+        "word_zh": "公車",
+        "video_url": "https://www.youtube.com/watch?v=7Kx6V5__f-U"
+    },
+    {
+        "vocab_id": "告訴",
+        "word_zh": "告訴",
+        "video_url": "https://www.youtube.com/watch?v=7bEGIcPGTC0"
+    },
+    {
+        "vocab_id": "我們",
+        "word_zh": "我們",
+        "video_url": "https://www.youtube.com/watch?v=HdASAQcLXt4"
+    },
+    {
+        "vocab_id": "放學",
+        "word_zh": "放學",
+        "video_url": "https://www.youtube.com/watch?v=8nA_yKU13do"
+    },
+    {
+        "vocab_id": "是",
+        "word_zh": "是",
+        "video_url": "https://www.youtube.com/watch?v=ihUgZfh5mOE"
+    },
+    {
+        "vocab_id": "會",
+        "word_zh": "會",
+        "video_url": "https://www.youtube.com/watch?v=m84f6YOelpg"
+    },
+    {
+        "vocab_id": "要",
+        "word_zh": "要",
+        "video_url": "https://www.youtube.com/watch?v=ihUgZfh5mOE"
+    },
+    {
+        "vocab_id": "還沒",
+        "word_zh": "還沒",
+        "video_url": "https://www.youtube.com/watch?v=ttCHPNuEQWA"
+    },
+    {
+        "vocab_id": "好吃",
+        "word_zh": "好吃",
+        "video_url": "https://www.youtube.com/watch?v=ihUgZfh5mOE"
+    },
+    {
+        "vocab_id": "我",
+        "word_zh": "我",
+        "video_url": "https://www.youtube.com/watch?v=Kbt5b-kj8Fs"
+    },
+    {
+        "vocab_id": "說話",
+        "word_zh": "說話",
+        "video_url": "https://www.youtube.com/watch?v=4-duJz6AwNI"
+    },
+    {
+        "vocab_id": "火車",
+        "word_zh": "火車",
+        "video_url": "https://www.youtube.com/watch?v=qyyHeJe5c68"
+    },
+    {
+        "vocab_id": "再見",
+        "word_zh": "再見",
+        "video_url": "https://www.youtube.com/watch?v=1m-RLe_vy2Q"
+    },
+    {
+        "vocab_id": "對不起",
+        "word_zh": "對不起",
+        "video_url": "https://www.youtube.com/watch?v=G7annnWsGqg"
+    },
+    {
+        "vocab_id": "高鐵",
+        "word_zh": "高鐵",
+        "video_url": "https://www.youtube.com/watch?v=pDLh83R-aNk"
+    }
+]
