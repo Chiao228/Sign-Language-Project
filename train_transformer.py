@@ -14,7 +14,7 @@ from sklearn.metrics import confusion_matrix
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V14_Transformer_66(with asl weight + add video)"
+OUTPUT_DIR = "train_V16_Transformer_66(with asl weight + sliding window)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -51,7 +51,7 @@ except ImportError:
 # --- 2. 固定參數 ---
 INPUT_DIM = 66       # 66 (精簡雙手，不含肩頸)
 TARGET_FRAMES = 30   
-DATA_PATH = "processed_npy_66"
+DATA_PATH = "sliding_window_66"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
