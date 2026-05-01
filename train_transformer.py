@@ -9,12 +9,12 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import interp1d
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V17_Transformer_66(with asl weight + sliding window)"
+OUTPUT_DIR = "train_V19_Transformer_66(with asl weight + sliding window + K-fold)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -72,11 +72,17 @@ class TSLDataset(Dataset):
                     self.samples.append(os.path.join(word_path, f))
                     self.labels.append(word_idx)
         self.samples, self.labels = np.array(self.samples), np.array(self.labels)
+        
+        # --- 加速優化：將所有資料預載入記憶體 ---
+        print(f"📦 正在將 {len(self.samples)} 筆資料載入記憶體以加速訓練...")
+        self.data_cache = [np.load(s) for s in self.samples]
+        print(f"✅ 載入完成！(減少 OneDrive/硬碟讀取延遲)")
 
     def __len__(self): return len(self.samples)
     
     def __getitem__(self, idx):
-        data = np.load(self.samples[idx])
+        # 從快取讀取資料並複製，避免擴增時修改到原始數據
+        data = self.data_cache[idx].copy()
         
         if self.augment:
             # --- 1. 平移 + 縮放
@@ -290,6 +296,9 @@ def save_augmentation_preview(dataset, output_path):
 def main():
     set_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\n🔥 目前正在使用的運算設備: {device}")
+    if device.type == 'cuda':
+        print(f"✨ 偵測到顯卡: {torch.cuda.get_device_name(0)}")
     full_dataset = TSLDataset(DATA_PATH, target_frames=TARGET_FRAMES)
 
     # --------------------------
@@ -323,94 +332,132 @@ def main():
             json.dump(bp, f, indent=4, ensure_ascii=False)
         print(f"✅ 最佳參數已存至 {params_file}")
 
-    # C. 正式訓練
-    # 修改：依照需求調整為 70/30 切分 (test_size=0.3)
-    train_idx, val_idx = train_test_split(
-        np.arange(len(full_dataset.labels)), 
-        test_size=0.3, 
-        stratify=full_dataset.labels, 
-        random_state=42
-    )
-    train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=bp['batch_size'], shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=bp['batch_size'], shuffle=False, collate_fn=collate_fn)
-
-    model = CNNTransformerTSL(INPUT_DIM, num_classes, bp['hidden_dim'], bp['num_layers'], bp['dropout']).to(device)
+    # C. 正式訓練 (改為 K-Fold 交叉驗證)
+    K_FOLDS = 5
+    skf = StratifiedKFold(n_splits=K_FOLDS, shuffle=True, random_state=42)
     
-    # --- 加載預訓練權重 (Transfer Learning / Warm Start) ---
-    loaded_count = load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
-    if loaded_count > 0:
-        print(f"✅ 成功載入 {loaded_count} 個層的預訓練權重！")
-    else:
-        print(f"ℹ️ 未發現權重檔 {PRETRAINED_WEIGHTS}，將從隨機初始化開始訓練。")
-    optimizer = optim.Adam(model.parameters(), lr=bp['learning_rate'], weight_decay=bp['weight_decay'])
-    criterion = nn.CrossEntropyLoss(label_smoothing=bp['label_smoothing'])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15)
+    all_fold_accuracies = []
+    all_indices = np.arange(len(full_dataset.labels))
+    all_labels = full_dataset.labels
 
-    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
-    min_val_loss, epochs_no_improve = float('inf'), 0
-    PATIENCE, EPOCHS = 30, 500
+    print(f"\n🔍 Step 2: Final Training with {K_FOLDS}-Fold Cross Validation...")
 
-    print(f"\n🚀 Final Training (70% Train, 30% Val)...")
-    for epoch in range(EPOCHS):
-        model.train(); full_dataset.augment = True
-        t_loss, t_correct, t_total = 0, 0, 0
-        for bx, by in train_loader:
-            bx, by = bx.to(device), by.to(device)
-            optimizer.zero_grad(); out = model(bx); loss = criterion(out, by); loss.backward(); optimizer.step()
-            t_loss += loss.item(); t_correct += (out.argmax(1) == by).sum().item(); t_total += by.size(0)
+    for fold, (train_idx, val_idx) in enumerate(skf.split(all_indices, all_labels)):
+        print(f"\n" + "="*40)
+        print(f"🚀 Training Fold {fold+1}/{K_FOLDS}")
+        print("="*40)
 
-        model.eval(); full_dataset.augment = False
-        v_loss, v_correct, v_total = 0, 0, 0
+        # 建立該 Fold 的子資料夾
+        FOLD_DIR = os.path.join(OUTPUT_DIR, f"Fold_{fold+1}")
+        os.makedirs(FOLD_DIR, exist_ok=True)
+
+        train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=bp['batch_size'], shuffle=True, collate_fn=collate_fn)
+        val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=bp['batch_size'], shuffle=False, collate_fn=collate_fn)
+
+        # 每次 Fold 都重新初始化模型與優化器
+        model = CNNTransformerTSL(INPUT_DIM, num_classes, bp['hidden_dim'], bp['num_layers'], bp['dropout']).to(device)
+        
+        # 加載預訓練權重
+        loaded_count = load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
+        if loaded_count > 0 and fold == 0:
+            print(f"✅ Fold 1: 成功載入 {loaded_count} 個層的預訓練權重")
+
+        optimizer = optim.Adam(model.parameters(), lr=bp['learning_rate'], weight_decay=bp['weight_decay'])
+        criterion = nn.CrossEntropyLoss(label_smoothing=bp['label_smoothing'])
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15)
+
+        history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+        min_val_loss, epochs_no_improve = float('inf'), 0
+        best_fold_acc = 0
+        PATIENCE, EPOCHS = 30, 500
+
+        for epoch in range(EPOCHS):
+            model.train(); full_dataset.augment = True
+            t_loss, t_correct, t_total = 0, 0, 0
+            for bx, by in train_loader:
+                bx, by = bx.to(device), by.to(device)
+                optimizer.zero_grad(); out = model(bx); loss = criterion(out, by); loss.backward(); optimizer.step()
+                t_loss += loss.item(); t_correct += (out.argmax(1) == by).sum().item(); t_total += by.size(0)
+
+            model.eval(); full_dataset.augment = False
+            v_loss, v_correct, v_total = 0, 0, 0
+            with torch.no_grad():
+                for vx, vy in val_loader:
+                    vx, vy = vx.to(device), vy.to(device)
+                    out = model(vx); v_loss += criterion(out, vy).item()
+                    v_correct += (out.argmax(1) == vy).sum().item(); v_total += vy.size(0)
+
+            avg_v_loss = v_loss/len(val_loader)
+            current_v_acc = v_correct/v_total
+            history['train_loss'].append(t_loss/len(train_loader)); history['val_loss'].append(avg_v_loss)
+            history['train_acc'].append(t_correct/t_total); history['val_acc'].append(current_v_acc)
+            scheduler.step(avg_v_loss)
+
+            if avg_v_loss < min_val_loss:
+                min_val_loss = avg_v_loss
+                best_fold_acc = current_v_acc
+                safe_save_model(model.state_dict(), os.path.join(FOLD_DIR, "best_model.pth"))
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+            if (epoch + 1) % 20 == 0:
+                print(f"Fold {fold+1} | Ep {epoch+1:03d} | Val Loss: {avg_v_loss:.4f} | Val Acc: {current_v_acc:.2%}")
+
+            if epochs_no_improve >= PATIENCE: 
+                print(f"🛑 Fold {fold+1} Early stopping at epoch {epoch+1}")
+                break
+
+        # 記錄該 Fold 的最終最佳成績
+        all_fold_accuracies.append(best_fold_acc)
+        
+        # 產出該 Fold 的報告
+        plot_training_curves(history, FOLD_DIR)
+        
+        # 載入該 Fold 最好的權重來產出混淆矩陣
+        model.load_state_dict(torch.load(os.path.join(FOLD_DIR, "best_model.pth")))
+        model.eval()
+        
+        # 匯出 ONNX (每一折都匯出，方便後續集成或挑選)
+        print(f"📦 Exporting Fold {fold+1} Model to ONNX...")
+        dummy_input = torch.randn(1, TARGET_FRAMES, INPUT_DIM).to(device)
+        onnx_path = os.path.join(FOLD_DIR, f"tsl_model_fold{fold+1}.onnx")
+        torch.onnx.export(model, dummy_input, onnx_path, 
+                        input_names=['input'], output_names=['output'], opset_version=17,
+                        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}})
+
+        all_preds, all_trues = [], []
         with torch.no_grad():
             for vx, vy in val_loader:
                 vx, vy = vx.to(device), vy.to(device)
-                out = model(vx); v_loss += criterion(out, vy).item()
-                v_correct += (out.argmax(1) == vy).sum().item(); v_total += vy.size(0)
+                out = model(vx); all_preds.extend(out.argmax(1).cpu().numpy()); all_trues.extend(vy.cpu().numpy())
+        plot_confusion_matrix(all_trues, all_preds, class_names, FOLD_DIR)
+        print(f"✅ Fold {fold+1} Completed. Best Val Acc: {best_fold_acc:.2%}")
 
-        avg_v_loss = v_loss/len(val_loader)
-        history['train_loss'].append(t_loss/len(train_loader)); history['val_loss'].append(avg_v_loss)
-        history['train_acc'].append(t_correct/t_total); history['val_acc'].append(v_correct/v_total)
-        scheduler.step(avg_v_loss)
-
-        if avg_v_loss < min_val_loss:
-            min_val_loss = avg_v_loss
-            safe_save_model(model.state_dict(), os.path.join(OUTPUT_DIR, "best_model.pth"))
-            epochs_no_improve = 0
-        else:
-            epochs_no_improve += 1
-
-        if (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch+1:03d} | Val Loss: {avg_v_loss*100:.2f}% | Val Acc: {history['val_acc'][-1]:.2%}")
-
-        if epochs_no_improve >= PATIENCE: 
-            print(f"🛑 Early stopping at epoch {epoch+1}")
-            break
-
-    # D. 產出報告與 ONNX 轉換
-    plot_training_curves(history, OUTPUT_DIR)
-    model.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, "best_model.pth")))
-    model.eval()
-
-    print("\n📦 Exporting Optimal Model to ONNX...")
-    dummy_input = torch.randn(1, TARGET_FRAMES, INPUT_DIM).to(device)
-    onnx_path = os.path.join(OUTPUT_DIR, "tsl_model.onnx")
+    # D. 最終總結
+    avg_acc = np.mean(all_fold_accuracies)
+    std_acc = np.std(all_fold_accuracies)
     
-    torch.onnx.export(
-        model, dummy_input, onnx_path, 
-        input_names=['input'], output_names=['output'],
-        opset_version=16, 
-        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}} 
-    )
-    print(f"✅ ONNX model saved to: {onnx_path}")
+    print("\n" + "⭐" * 30)
+    print(f"🏆 K-Fold Cross Validation Summary ({K_FOLDS} Folds)")
+    for i, acc in enumerate(all_fold_accuracies):
+        print(f"   Fold {i+1}: {acc:.2%}")
+    print("-" * 30)
+    print(f"   Average Accuracy: {avg_acc:.2%}")
+    print(f"   Standard Deviation: {std_acc:.4f}")
+    print("⭐" * 30)
 
-    # 產出混淆矩陣
-    all_preds, all_trues = [], []
-    with torch.no_grad():
-        for vx, vy in val_loader:
-            vx, vy = vx.to(device), vy.to(device)
-            out = model(vx); all_preds.extend(out.argmax(1).cpu().numpy()); all_trues.extend(vy.cpu().numpy())
-    plot_confusion_matrix(all_trues, all_preds, class_names, OUTPUT_DIR)
-    print(f"✨ All Tasks Completed! Files saved in: {OUTPUT_DIR}")
+    # 將總結存入 JSON
+    summary = {
+        "fold_accuracies": all_fold_accuracies,
+        "average_accuracy": avg_acc,
+        "std_deviation": std_acc,
+        "best_params": bp
+    }
+    with open(os.path.join(OUTPUT_DIR, "kfold_summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=4, ensure_ascii=False)
+    
+    print(f"✨ All Tasks Completed! Results saved in: {OUTPUT_DIR}")
 
 if __name__ == "__main__":
     main()

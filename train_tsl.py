@@ -9,17 +9,15 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import interp1d
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V16_GRU_66(with asl weight + sliding)"
+OUTPUT_DIR = "train_V17_GRU_66(with asl weight + sliding window + K-fold)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "best_model_gru_66.pth" 
-#PRETRAINED_WEIGHTS = " " 
-
 
 plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
@@ -49,7 +47,7 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 66       # 66 (精簡雙手，不含肩頸)
+INPUT_DIM = 66       
 TARGET_FRAMES = 30   
 DATA_PATH = "sliding_window_66"
 
@@ -72,23 +70,24 @@ class TSLDataset(Dataset):
                     self.samples.append(os.path.join(word_path, f))
                     self.labels.append(word_idx)
         self.samples, self.labels = np.array(self.samples), np.array(self.labels)
+        
+        # --- 加速優化：將所有資料預載入記憶體 ---
+        print(f"📦 正在將 {len(self.samples)} 筆資料載入記憶體以加速訓練...")
+        self.data_cache = [np.load(s) for s in self.samples]
+        print(f"✅ 載入完成！(減少 OneDrive/硬碟讀取延遲)")
 
     def __len__(self): return len(self.samples)
     
     def __getitem__(self, idx):
-        data = np.load(self.samples[idx])
+        # 從快取讀取資料並複製，避免擴增時修改到原始數據
+        data = self.data_cache[idx].copy()
         
         if self.augment:
-            # --- 1. 平移 + 縮放
             if random.random() < 0.6:  
                 data, _ = random_shift_safe(data)  
                 data, _ = scale_hand_parts(data)    
-
-            # --- 2. 模擬左撇子 ---
             if random.random() < 0.5: 
                 data = horizontal_flip_safe(data)   
-
-            # --- 3. 破壞性/干擾性擴增 ---
             if random.random() < 0.3:
                 data, _ = rotate_landmarks_safe(data)
             if random.random() < 0.3: 
@@ -106,7 +105,6 @@ def collate_fn(batch):
 class CNNGRUTSL(nn.Module):
     def __init__(self, input_dim, num_classes, hidden_dim, num_layers, dropout=0.4):
         super(CNNGRUTSL, self).__init__()
-        # CNN 提取局部特徵
         self.cnn = nn.Sequential(
             nn.Conv1d(input_dim, 128, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm1d(128),
@@ -118,17 +116,15 @@ class CNNGRUTSL(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # [修改點] 更換為雙向 GRU
         self.gru = nn.GRU(
             input_size=hidden_dim, 
             hidden_size=hidden_dim, 
             num_layers=num_layers, 
             batch_first=True, 
             dropout=dropout if num_layers > 1 else 0,
-            bidirectional=True # 雙向捕捉動作軌跡
+            bidirectional=True 
         )
         
-        # 因為是雙向，輸入維度要 * 2
         self.fc = nn.Sequential(
             nn.Linear(hidden_dim * 2, 128), 
             nn.ReLU(),
@@ -137,13 +133,8 @@ class CNNGRUTSL(nn.Module):
         )
 
     def forward(self, x):
-        # CNN: (Batch, Frames, Dim) -> (Batch, Dim, Frames)
         x = self.cnn(x.transpose(1, 2)).transpose(1, 2)
-        
-        # GRU: (Batch, Frames, hidden_dim * 2)
         x, _ = self.gru(x)
-        
-        # 結合 Mean 與 Max Pooling
         avg_pool = x.mean(dim=1)
         max_pool, _ = x.max(dim=1)
         return self.fc(avg_pool + max_pool)
@@ -170,9 +161,6 @@ def plot_confusion_matrix(y_true, y_pred, classes, folder):
     plt.close()
 
 def safe_save_model(state_dict, path):
-    """
-    解決 Windows/OneDrive 檔案鎖定問題 (Error 32) 的安全儲存函式
-    """
     import time
     for i in range(5):
         try:
@@ -186,15 +174,10 @@ def safe_save_model(state_dict, path):
                 raise e
     print(f"❌ 無法儲存模型至 {path}，請檢查檔案是否被其他程式開啟。")
 
-# --- 6. 權重載入小工具 ---
 def load_pretrained_weights(model, weights_path, device):
-    """
-    自動載入預訓練權重，並跳過形狀不符的層 (例如分類層)。
-    """
     if os.path.exists(weights_path):
         state_dict = torch.load(weights_path, map_location=device)
         model_dict = model.state_dict()
-        # 僅載入名稱與形狀皆相符的權重
         new_state_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.size() == model_dict[k].size()}
         model.load_state_dict(new_state_dict, strict=False)
         return len(new_state_dict)
@@ -213,7 +196,6 @@ def objective(trial):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = TSLDataset(DATA_PATH, target_frames=TARGET_FRAMES)
     
-    # 修改：依照需求調整為 70/30 切分 (test_size=0.3)
     train_idx, val_idx = train_test_split(
         np.arange(len(dataset.labels)), 
         test_size=0.3, 
@@ -224,8 +206,6 @@ def objective(trial):
     val_loader = DataLoader(Subset(dataset, val_idx), batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
     model = CNNGRUTSL(INPUT_DIM, len(dataset.label_map), h_dim, n_layers, dropout).to(device)
-    
-    # 遷移學習：搜尋時也載入基礎權重
     load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
     
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
@@ -249,161 +229,135 @@ def objective(trial):
         if trial.should_prune(): raise optuna.exceptions.TrialPruned()
     return avg_v_loss 
 
-# 檢查函式
 def save_augmentation_preview(dataset, output_path):
-    import matplotlib.pyplot as plt
-    dataset.augment = True # 開啟隨機擴增
-    
-    # 抓取同一筆原始資料兩次，觀察其隨機產生的變體
+    dataset.augment = True 
     data1, _ = dataset[0] 
     data2, _ = dataset[0]
-    
     plt.figure(figsize=(12, 6))
-    
-    # 繪製曲線
-    plt.plot(data1[0].numpy(), label='Random Augmentation 1 (隨機擴增 1)', alpha=0.7)
-    plt.plot(data2[0].numpy(), label='Random Augmentation 2 (隨機擴增 2)', alpha=0.7, linestyle='--')
-    
-    # --- 加入軸標籤與說明 ---
-    plt.title("Online Augmentation Check (動態擴增預覽)", fontsize=14)
-    plt.xlabel("Feature Index (66-dim: Hands Only)\n特徵索引 (66維：純精簡雙手)", fontsize=10)
-    plt.ylabel("Normalized Coordinate Value (Relative Position)\n正規化座標值 (相對位置)", fontsize=10)
-    
-    # 加入格線輔助觀察偏移量
+    plt.plot(data1[0].numpy(), label='Random Augmentation 1', alpha=0.7)
+    plt.plot(data2[0].numpy(), label='Random Augmentation 2', alpha=0.7, linestyle='--')
+    plt.title("Online Augmentation Check", fontsize=14)
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.legend()
-    
-    # 儲存檔案
     preview_file = os.path.join(output_path, "online_aug_preview.png")
     plt.savefig(preview_file, bbox_inches='tight')
     plt.close()
-    print(f"📸 含有軸標籤的預覽圖已存至：{preview_file}")
 
 # --- 7. 主程式 ---
 def main():
     set_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\n🔥 目前正在使用的運算設備: {device}")
+    if device.type == 'cuda':
+        print(f"✨ 偵測到顯卡: {torch.cuda.get_device_name(0)}")
+        
     full_dataset = TSLDataset(DATA_PATH, target_frames=TARGET_FRAMES)
-
-    # --------------------------
     save_augmentation_preview(full_dataset, OUTPUT_DIR)
-    # --------------------------
 
     num_classes = len(full_dataset.label_map)
     class_names = [full_dataset.label_map[i] for i in range(num_classes)]
     
-    # 儲存 Label Map
     label_map_path = os.path.join(OUTPUT_DIR, 'label_map.json')
     with open(label_map_path, 'w', encoding='utf-8') as f:
         json.dump(full_dataset.label_map, f, ensure_ascii=False, indent=4)
-    print(f"✅ Label Map 已儲存至 {label_map_path}")
 
-    # B. 超參數搜尋 (優先檢測現有參數)
     params_file = os.path.join(OUTPUT_DIR, "best_params.json")
-    
     if os.path.exists(params_file):
-        print(f"📄 檢測到現有的參數檔，直接讀取：{params_file}")
+        print(f"📄 讀取現有參數：{params_file}")
         with open(params_file, "r", encoding="utf-8") as f:
             bp = json.load(f)
     else:
-        print("🔍 Step 1: Hyperparameter Optimization (70/30 Split)...")
+        print("🔍 Step 1: Hyperparameter Optimization...")
         sampler = optuna.samplers.TPESampler(seed=42)
         study = optuna.create_study(direction="minimize", sampler=sampler)
         study.optimize(objective, n_trials=25)
         bp = study.best_params
-        
         with open(params_file, "w", encoding="utf-8") as f:
             json.dump(bp, f, indent=4, ensure_ascii=False)
-        print(f"✅ 最佳參數已存至 {params_file}")
 
-    # C. 正式訓練
-    # 修改：依照需求調整為 70/30 切分 (test_size=0.3)
-    train_idx, val_idx = train_test_split(
-        np.arange(len(full_dataset.labels)), 
-        test_size=0.3, 
-        stratify=full_dataset.labels, 
-        random_state=42
-    )
-    train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=bp['batch_size'], shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=bp['batch_size'], shuffle=False, collate_fn=collate_fn)
-
-    model = CNNGRUTSL(INPUT_DIM, num_classes, bp['hidden_dim'], bp['num_layers'], bp['dropout']).to(device)
+    # C. 正式訓練 (K-Fold)
+    K_FOLDS = 5
+    skf = StratifiedKFold(n_splits=K_FOLDS, shuffle=True, random_state=42)
+    all_fold_accuracies = []
     
-    # --- 加載預訓練權重 (Transfer Learning / Warm Start) ---
-    loaded_count = load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
-    if loaded_count > 0:
-        print(f"✅ 成功載入 {loaded_count} 個層的預訓練權重！")
-    else:
-        print(f"ℹ️ 未發現權重檔 {PRETRAINED_WEIGHTS}，將從隨機初始化開始訓練。")
-    optimizer = optim.Adam(model.parameters(), lr=bp['learning_rate'], weight_decay=bp['weight_decay'])
-    criterion = nn.CrossEntropyLoss(label_smoothing=bp['label_smoothing'])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15)
+    print(f"\n🔍 Step 2: Final Training with {K_FOLDS}-Fold CV...")
+    for fold, (train_idx, val_idx) in enumerate(skf.split(np.arange(len(full_dataset.labels)), full_dataset.labels)):
+        print(f"\n===== 🚀 Training Fold {fold+1}/{K_FOLDS} =====")
+        FOLD_DIR = os.path.join(OUTPUT_DIR, f"Fold_{fold+1}")
+        os.makedirs(FOLD_DIR, exist_ok=True)
 
-    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
-    min_val_loss, epochs_no_improve = float('inf'), 0
-    PATIENCE, EPOCHS = 30, 500
+        train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=bp['batch_size'], shuffle=True, collate_fn=collate_fn)
+        val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=bp['batch_size'], shuffle=False, collate_fn=collate_fn)
 
-    print(f"\n🚀 Final Training (70% Train, 30% Val)...")
-    for epoch in range(EPOCHS):
-        model.train(); full_dataset.augment = True
-        t_loss, t_correct, t_total = 0, 0, 0
-        for bx, by in train_loader:
-            bx, by = bx.to(device), by.to(device)
-            optimizer.zero_grad(); out = model(bx); loss = criterion(out, by); loss.backward(); optimizer.step()
-            t_loss += loss.item(); t_correct += (out.argmax(1) == by).sum().item(); t_total += by.size(0)
+        model = CNNGRUTSL(INPUT_DIM, num_classes, bp['hidden_dim'], bp['num_layers'], bp['dropout']).to(device)
+        load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
+        
+        optimizer = optim.Adam(model.parameters(), lr=bp['learning_rate'], weight_decay=bp['weight_decay'])
+        criterion = nn.CrossEntropyLoss(label_smoothing=bp['label_smoothing'])
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15)
 
-        model.eval(); full_dataset.augment = False
-        v_loss, v_correct, v_total = 0, 0, 0
+        history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+        min_val_loss, epochs_no_improve = float('inf'), 0
+        best_fold_acc, PATIENCE, EPOCHS = 0, 30, 500
+
+        for epoch in range(EPOCHS):
+            model.train(); full_dataset.augment = True
+            t_loss, t_correct, t_total = 0, 0, 0
+            for bx, by in train_loader:
+                bx, by = bx.to(device), by.to(device)
+                optimizer.zero_grad(); out = model(bx); loss = criterion(out, by); loss.backward(); optimizer.step()
+                t_loss += loss.item(); t_correct += (out.argmax(1) == by).sum().item(); t_total += by.size(0)
+
+            model.eval(); full_dataset.augment = False
+            v_loss, v_correct, v_total = 0, 0, 0
+            with torch.no_grad():
+                for vx, vy in val_loader:
+                    vx, vy = vx.to(device), vy.to(device)
+                    out = model(vx); v_loss += criterion(out, vy).item()
+                    v_correct += (out.argmax(1) == vy).sum().item(); v_total += vy.size(0)
+
+            avg_v_loss = v_loss/len(val_loader)
+            current_v_acc = v_correct/v_total
+            history['train_loss'].append(t_loss/len(train_loader)); history['val_loss'].append(avg_v_loss)
+            history['train_acc'].append(t_correct/t_total); history['val_acc'].append(current_v_acc)
+            scheduler.step(avg_v_loss)
+
+            if avg_v_loss < min_val_loss:
+                min_val_loss = avg_v_loss
+                best_fold_acc = current_v_acc
+                safe_save_model(model.state_dict(), os.path.join(FOLD_DIR, "best_model.pth"))
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+            if (epoch + 1) % 20 == 0:
+                print(f"Fold {fold+1} | Ep {epoch+1:03d} | Val Loss: {avg_v_loss:.4f} | Val Acc: {current_v_acc:.2%}")
+            if epochs_no_improve >= PATIENCE: break
+
+        all_fold_accuracies.append(best_fold_acc)
+        plot_training_curves(history, FOLD_DIR)
+        model.load_state_dict(torch.load(os.path.join(FOLD_DIR, "best_model.pth")))
+        
+        # ONNX Export
+        print(f"📦 Exporting Fold {fold+1} to ONNX...")
+        dummy_input = torch.randn(1, TARGET_FRAMES, INPUT_DIM).to(device)
+        torch.onnx.export(model, dummy_input, os.path.join(FOLD_DIR, f"tsl_model_fold{fold+1}.onnx"), 
+                        input_names=['input'], output_names=['output'], opset_version=17,
+                        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}})
+
+        all_preds, all_trues = [], []
         with torch.no_grad():
             for vx, vy in val_loader:
                 vx, vy = vx.to(device), vy.to(device)
-                out = model(vx); v_loss += criterion(out, vy).item()
-                v_correct += (out.argmax(1) == vy).sum().item(); v_total += vy.size(0)
+                out = model(vx); all_preds.extend(out.argmax(1).cpu().numpy()); all_trues.extend(vy.cpu().numpy())
+        plot_confusion_matrix(all_trues, all_preds, class_names, FOLD_DIR)
+        print(f"✅ Fold {fold+1} Best Acc: {best_fold_acc:.2%}")
 
-        avg_v_loss = v_loss/len(val_loader)
-        history['train_loss'].append(t_loss/len(train_loader)); history['val_loss'].append(avg_v_loss)
-        history['train_acc'].append(t_correct/t_total); history['val_acc'].append(v_correct/v_total)
-        scheduler.step(avg_v_loss)
-
-        if avg_v_loss < min_val_loss:
-            min_val_loss = avg_v_loss
-            safe_save_model(model.state_dict(), os.path.join(OUTPUT_DIR, "best_model.pth"))
-            epochs_no_improve = 0
-        else:
-            epochs_no_improve += 1
-
-        if (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch+1:03d} | Val Loss: {avg_v_loss*100:.2f}% | Val Acc: {history['val_acc'][-1]:.2%}")
-
-        if epochs_no_improve >= PATIENCE: 
-            print(f"🛑 Early stopping at epoch {epoch+1}")
-            break
-
-    # D. 產出報告與 ONNX 轉換
-    plot_training_curves(history, OUTPUT_DIR)
-    model.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, "best_model.pth")))
-    model.eval()
-
-    print("\n📦 Exporting Optimal Model to ONNX...")
-    dummy_input = torch.randn(1, TARGET_FRAMES, INPUT_DIM).to(device)
-    onnx_path = os.path.join(OUTPUT_DIR, "tsl_model.onnx")
-    
-    torch.onnx.export(
-        model, dummy_input, onnx_path, 
-        input_names=['input'], output_names=['output'],
-        opset_version=16, 
-        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}} 
-    )
-    print(f"✅ ONNX model saved to: {onnx_path}")
-
-    # 產出混淆矩陣
-    all_preds, all_trues = [], []
-    with torch.no_grad():
-        for vx, vy in val_loader:
-            vx, vy = vx.to(device), vy.to(device)
-            out = model(vx); all_preds.extend(out.argmax(1).cpu().numpy()); all_trues.extend(vy.cpu().numpy())
-    plot_confusion_matrix(all_trues, all_preds, class_names, OUTPUT_DIR)
-    print(f"✨ All Tasks Completed! Files saved in: {OUTPUT_DIR}")
+    # Final Summary
+    avg_acc = np.mean(all_fold_accuracies)
+    print("\n" + "⭐" * 30)
+    print(f"🏆 K-Fold Summary (Average: {avg_acc:.2%}, Std: {np.std(all_fold_accuracies):.4f})")
+    print("⭐" * 30)
 
 if __name__ == "__main__":
     main()
