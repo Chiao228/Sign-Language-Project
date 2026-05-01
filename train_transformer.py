@@ -14,7 +14,7 @@ from sklearn.metrics import confusion_matrix
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V16_Transformer_66(with asl weight + sliding window)"
+OUTPUT_DIR = "train_V17_Transformer_66(with asl weight + sliding window)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
