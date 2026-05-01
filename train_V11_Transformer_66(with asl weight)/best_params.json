@@ -1,0 +1,9 @@
+{
+    "hidden_dim": 128,
+    "num_layers": 2,
+    "learning_rate": 0.0005682526148583233,
+    "batch_size": 16,
+    "dropout": 0.5215892061740143,
+    "weight_decay": 0.030699881392125438,
+    "label_smoothing": 0.05649648223000722
+}

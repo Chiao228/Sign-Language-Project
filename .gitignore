@@ -27,7 +27,18 @@ video_count.md
 
 # Models & Weights
 *.pth
+*.onnx
+*.onnx.data
 models/
+
+# Whitelist for training results
+!train_*/
+!train_**/*.png
+!train_**/*.pth
+!train_**/*.onnx
+!train_**/*.onnx.data
+!train_**/*.json
+!train_**/*.txt
 
 # System Files
 .DS_Store
