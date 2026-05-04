@@ -14,11 +14,11 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V19_Transformer_66(with asl weight + sliding window + K-fold)"
+OUTPUT_DIR = "train_V20_Transformer_66(sliding window + K-fold)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
-#PRETRAINED_WEIGHTS = " " 
+#PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
+PRETRAINED_WEIGHTS = " " 
 
 
 plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'sans-serif']

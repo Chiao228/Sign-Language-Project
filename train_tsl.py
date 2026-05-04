@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V17_GRU_66(with asl weight + sliding window + K-fold)"
+OUTPUT_DIR = "train_V18_GRU_66(with asl weight + sliding window + K-fold)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "best_model_gru_66.pth" 
