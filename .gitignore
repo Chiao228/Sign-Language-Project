@@ -49,5 +49,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-#analysis
+# analysis
+!landmark_analysis_*/
+landmark_analysis_*/*
 !landmark_analysis_*/*.png
