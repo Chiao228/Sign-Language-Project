@@ -50,4 +50,4 @@ Thumbs.db
 .idea/
 
 #analysis
-!landmark_analysis_72_**/*.pngs
+!landmark_analysis_*/*.png
