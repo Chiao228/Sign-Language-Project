@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-sliding_window_crop.py
-======================
-滑窗裁切與過濾 (66D 版本 - 精簡手部特徵)
-描述：此腳本不再尋找單一動態區塊，而是使用固定長度的滑窗 (Sliding Window) 遍歷整個序列。
+sliding_window_crop_138.py
+==========================
+滑窗裁切與過濾 (138 維版本 - 雙手 + 鼻子 + 雙肩 + 下巴)
+描述：此腳本使用固定長度的滑窗 (Sliding Window) 遍歷 138 維特徵序列。
      若視窗內的平均動態能量高於門檻，則將其存為一個獨立的樣本。
+     138 維包含：左手(63) + 右手(63) + 臉部/身體核心點(12: 鼻子, 下巴, 左肩, 右肩)。
 """
 
 import os
@@ -15,7 +16,7 @@ from pathlib import Path
 # ==========================================
 # 1. Hyperparameters & Paths
 # ==========================================
-SOURCE_DIR = Path("tsl_features_138")   # features.py 產出的 66 維資料
+SOURCE_DIR = Path("tsl_features_138")   # 來源 138 維資料
 OUTPUT_DIR = Path("sliding_window_138") # 滑窗產出的輸出地
 
 WINDOW_SIZE = 30  # 視窗長度
@@ -29,31 +30,38 @@ def process_single_file(file_path, output_dir):
     try:
         features = np.load(file_path).astype(np.float32)
         N, D = features.shape
-        # 66 維度防護
-        if D != 66:
-            return 0, f"無效格式(D:{D})"
+        
+        # 138 維度檢查
+        if D != 138:
+            return 0, f"無效格式(D:{D}, 預期應為 138)"
         
         if N < WINDOW_SIZE:
-            # 如果不夠長，可以選擇補零或直接拉伸。這裡比照原架構，若太短則拉伸一次
-            resized = cv2.resize(features, (66, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
+            # 如果不夠長，則拉伸為一個 WINDOW_SIZE 長度的檔案
+            resized = cv2.resize(features, (138, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
             save_path = output_dir / f"{file_path.stem}_full.npy"
             np.save(save_path, resized)
             return 1, "長度不足 WINDOW_SIZE，已拉伸存為單一檔案"
 
-        # 1. 重心偵測：計算兩手重心 (手腕到指尖 共11點)
-        lh_pts = features[:, 0:33].reshape(-1, 11, 3)
-        rh_pts = features[:, 33:66].reshape(-1, 11, 3)
+        # 1. 重心偵測：計算兩手重心 (138 維中，左手 0-63, 右手 63-126)
+        # 每隻手 21 個點，每個點 3 維 (x, y, z)
+        lh_pts = features[:, 0:63].reshape(-1, 21, 3)
+        rh_pts = features[:, 63:126].reshape(-1, 21, 3)
+        
+        # 計算每幀的重心 (N, 3)
         lh_center = np.mean(lh_pts, axis=1) 
         rh_center = np.mean(rh_pts, axis=1)
-        centers = np.hstack([lh_center, rh_center]) # (N, 6)
         
-        # 2. 計算每幀的能量 (標準差)
+        # 合併兩手重心作為能量判斷基準 (N, 6)
+        centers = np.hstack([lh_center, rh_center]) 
+        
+        # 2. 計算每幀的能量 (標準差，反映局部時間窗內的變動量)
         energy_list = []
         win_std = 5
         for i in range(len(centers)):
             start_w = max(0, i - win_std // 2)
             end_w = min(len(centers), i + win_std // 2 + 1)
             window = centers[start_w:end_w]
+            # 取 6 個維度標準差的平均值
             energy_list.append(np.mean(np.std(window, axis=0)))
         energy = np.array(energy_list)
 
@@ -95,7 +103,7 @@ def process_single_file(file_path, output_dir):
 
 def main():
     print("=" * 60)
-    print("🚀 啟動滑窗裁切 (Sliding Window) 處理管線")
+    print("🚀 啟動滑窗裁切 (Sliding Window) 138D 處理管線")
     print(f"⚙️  視窗大小: {WINDOW_SIZE}, 步長: {STRIDE}, 門檻: {ENERGY_THRESHOLD}")
     print("=" * 60)
     
@@ -118,8 +126,12 @@ def main():
     fail_count = 0
     
     for idx, file_path in enumerate(all_files, 1):
-        # 注意：滑窗可能會產出多個檔案，所以輸出路徑處理方式稍有不同
-        relative_parent = file_path.relative_to(SOURCE_DIR).parent
+        # 保持目錄結構
+        try:
+            relative_parent = file_path.relative_to(SOURCE_DIR).parent
+        except ValueError:
+            relative_parent = Path(".")
+            
         target_subdir = OUTPUT_DIR / relative_parent
         target_subdir.mkdir(parents=True, exist_ok=True)
         

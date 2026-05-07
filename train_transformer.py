@@ -9,12 +9,12 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import interp1d
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score, classification_report
 from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V21_Transformer_66(with asl weight + new video + sliding window + K-fold)"
+OUTPUT_DIR = "train_V22_Transformer_66(with asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -48,7 +48,7 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 66       # 66 (精簡雙手，不含肩頸)
+INPUT_DIM = 66       # 66 (通常為雙手骨架點)
 TARGET_FRAMES = 30   
 DATA_PATH = "sliding_window_66"
 
@@ -161,17 +161,56 @@ class CNNTransformerTSL(nn.Module):
         return self.fc(avg_pool + max_pool)
 
 # --- 5. 視覺化函式 ---
-def plot_training_curves(history, folder):
-    plt.figure(figsize=(15, 6))
-    plt.subplot(1, 2, 1)
-    plt.plot(history['train_loss'], label='Train Loss'); plt.plot(history['val_loss'], label='Val Loss')
-    plt.title('Loss Curve'); plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.legend()
-    plt.subplot(1, 2, 2)
-    plt.plot(history['train_acc'], label='Train Acc'); plt.plot(history['val_acc'], label='Val Acc')
-    plt.title('Accuracy Curve'); plt.xlabel('Epoch'); plt.ylabel('Accuracy'); plt.legend()
+def plot_comprehensive_report(history, y_true, y_pred, classes, folder, fold_num):
+    """
+    將 Loss, Accuracy, F1 摺線圖與每類別的詳細分類報告 (Precision, Recall, F1, Support) 整合在同一張圖中。
+    """
+    # 1. 計算分類報告 (字典格式)
+    report_dict = classification_report(y_true, y_pred, target_names=classes, output_dict=True, zero_division=0)
+    
+    # 提取資料 (排除統計摘要行)
+    metrics_keys = ['precision', 'recall', 'f1-score', 'support']
+    labels = [k for k in report_dict.keys() if k not in ['accuracy', 'macro avg', 'weighted avg']]
+    data = [[report_dict[l][m] for m in metrics_keys] for l in labels]
+    
+    # 2. 建立畫布
+    fig = plt.figure(figsize=(22, 18))
+    # 上方 1/3 放摺線圖，下方 2/3 放熱圖 (適用於詞彙較多的情況)
+    gs = plt.GridSpec(2, 3, height_ratios=[1, 2.5])
+    
+    # (A) Loss 摺線圖
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(history['train_loss'], label='Train Loss', color='blue', linewidth=2)
+    ax1.plot(history['val_loss'], label='Val Loss', color='orange', linewidth=2)
+    ax1.set_title(f'Fold {fold_num} - Loss Curve', fontsize=14, fontweight='bold')
+    ax1.set_xlabel('Epoch'); ax1.set_ylabel('Loss'); ax1.legend(); ax1.grid(True, alpha=0.3)
+    
+    # (B) Accuracy 摺線圖
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.plot(history['train_acc'], label='Train Acc', color='green', linewidth=2)
+    ax2.plot(history['val_acc'], label='Val Acc', color='red', linewidth=2)
+    ax2.set_title(f'Fold {fold_num} - Accuracy Curve', fontsize=14, fontweight='bold')
+    ax2.set_xlabel('Epoch'); ax2.set_ylabel('Accuracy'); ax2.legend(); ax2.grid(True, alpha=0.3)
+    
+    # (C) F1-Score 摺線圖
+    ax3 = fig.add_subplot(gs[0, 2])
+    if 'val_f1' in history:
+        ax3.plot(history['val_f1'], label='Val F1 (Macro)', color='purple', linewidth=2)
+        ax3.set_title(f'Fold {fold_num} - F1 Score Curve', fontsize=14, fontweight='bold')
+        ax3.set_xlabel('Epoch'); ax3.set_ylabel('F1 Score'); ax3.legend(); ax3.grid(True, alpha=0.3)
+    
+    # (D) 每詞彙詳細指標熱圖 (Precision, Recall, F1, Support)
+    ax4 = fig.add_subplot(gs[1, :])
+    sns.heatmap(data, annot=True, fmt='.2f', cmap='YlGnBu', 
+                xticklabels=['Precision', 'Recall', 'F1-Score', 'Support'],
+                yticklabels=labels, ax=ax4, annot_kws={"size": 10}, cbar=True)
+    ax4.set_title(f'Fold {fold_num} - Per-word Detailed Report', fontsize=16, fontweight='bold')
+    
     plt.tight_layout()
-    plt.savefig(os.path.join(folder, "full_training_report.png"))
+    report_img_path = os.path.join(folder, "comprehensive_report.png")
+    plt.savefig(report_img_path, dpi=120)
     plt.close()
+    print(f"📊 綜合報告圖表已存至：{report_img_path}")
 
 def plot_confusion_matrix(y_true, y_pred, classes, folder):
     cm = confusion_matrix(y_true, y_pred)
@@ -278,7 +317,7 @@ def save_augmentation_preview(dataset, output_path):
     
     # --- 加入軸標籤與說明 ---
     plt.title("Online Augmentation Check (動態擴增預覽)", fontsize=14)
-    plt.xlabel("Feature Index (66-dim: Hands Only)\n特徵索引 (66維：純精簡雙手)", fontsize=10)
+    plt.xlabel(f"Feature Index ({INPUT_DIM}-dim: Hands/Skeleton)\n特徵索引 ({INPUT_DIM}維：手部/骨架點)", fontsize=10)
     plt.ylabel("Normalized Coordinate Value (Relative Position)\n正規化座標值 (相對位置)", fontsize=10)
     
     # 加入格線輔助觀察偏移量
@@ -336,6 +375,7 @@ def main():
     skf = StratifiedKFold(n_splits=K_FOLDS, shuffle=True, random_state=42)
     
     all_fold_accuracies = []
+    all_fold_f1_scores = []
     all_indices = np.arange(len(full_dataset.labels))
     all_labels = full_dataset.labels
 
@@ -365,9 +405,9 @@ def main():
         criterion = nn.CrossEntropyLoss(label_smoothing=bp['label_smoothing'])
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15)
 
-        history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+        history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': [], 'val_f1': []}
         min_val_loss, epochs_no_improve = float('inf'), 0
-        best_fold_acc = 0
+        best_fold_acc, best_fold_f1 = 0, 0
         PATIENCE, EPOCHS = 30, 500
 
         for epoch in range(EPOCHS):
@@ -380,21 +420,28 @@ def main():
 
             model.eval(); full_dataset.augment = False
             v_loss, v_correct, v_total = 0, 0, 0
+            all_v_preds, all_v_trues = [], []
             with torch.no_grad():
                 for vx, vy in val_loader:
                     vx, vy = vx.to(device), vy.to(device)
                     out = model(vx); v_loss += criterion(out, vy).item()
-                    v_correct += (out.argmax(1) == vy).sum().item(); v_total += vy.size(0)
+                    preds = out.argmax(1)
+                    v_correct += (preds == vy).sum().item(); v_total += vy.size(0)
+                    all_v_preds.extend(preds.cpu().numpy()); all_v_trues.extend(vy.cpu().numpy())
 
             avg_v_loss = v_loss/len(val_loader)
             current_v_acc = v_correct/v_total
+            current_v_f1 = f1_score(all_v_trues, all_v_preds, average='macro', zero_division=0)
+
             history['train_loss'].append(t_loss/len(train_loader)); history['val_loss'].append(avg_v_loss)
             history['train_acc'].append(t_correct/t_total); history['val_acc'].append(current_v_acc)
+            history['val_f1'].append(current_v_f1)
             scheduler.step(avg_v_loss)
 
             if avg_v_loss < min_val_loss:
                 min_val_loss = avg_v_loss
                 best_fold_acc = current_v_acc
+                best_fold_f1 = current_v_f1
                 safe_save_model(model.state_dict(), os.path.join(FOLD_DIR, "best_model.pth"))
                 epochs_no_improve = 0
             else:
@@ -409,9 +456,7 @@ def main():
 
         # 記錄該 Fold 的最終最佳成績
         all_fold_accuracies.append(best_fold_acc)
-        
-        # 產出該 Fold 的報告
-        plot_training_curves(history, FOLD_DIR)
+        all_fold_f1_scores.append(best_fold_f1)
         
         # 載入該 Fold 最好的權重來產出混淆矩陣
         model.load_state_dict(torch.load(os.path.join(FOLD_DIR, "best_model.pth")))
@@ -430,6 +475,21 @@ def main():
             for vx, vy in val_loader:
                 vx, vy = vx.to(device), vy.to(device)
                 out = model(vx); all_preds.extend(out.argmax(1).cpu().numpy()); all_trues.extend(vy.cpu().numpy())
+        
+        # 產出詳細分類報告 (含 Precision, Recall, F1, Support)
+        report = classification_report(all_trues, all_preds, target_names=class_names, zero_division=0)
+        report_path = os.path.join(FOLD_DIR, "classification_report.txt")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(f"Fold {fold+1} Best Model Report\n")
+            f.write("="*30 + "\n")
+            f.write(report)
+        
+        print(f"📄 Fold {fold+1} 分類報告：\n{report}")
+        print(f"✅ 報告已儲存至：{report_path}")
+
+        # 產出綜合圖表 (摺線圖 + 每詞彙詳細指標)
+        plot_comprehensive_report(history, all_trues, all_preds, class_names, FOLD_DIR, fold+1)
+
         plot_confusion_matrix(all_trues, all_preds, class_names, FOLD_DIR)
         print(f"✅ Fold {fold+1} Completed. Best Val Acc: {best_fold_acc:.2%}")
 
@@ -449,7 +509,9 @@ def main():
     # 將總結存入 JSON
     summary = {
         "fold_accuracies": all_fold_accuracies,
+        "fold_f1_scores": all_fold_f1_scores,
         "average_accuracy": avg_acc,
+        "average_f1_score": np.mean(all_fold_f1_scores),
         "std_deviation": std_acc,
         "best_params": bp
     }
