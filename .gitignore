@@ -53,3 +53,6 @@ Thumbs.db
 !landmark_analysis_*/
 landmark_analysis_*/*
 !landmark_analysis_*/*.png
+!landmark_analysis_*/*.md
+!landmark_analysis_*/*.json
+

@@ -219,6 +219,48 @@ def run_ablation_study(model, dataset, val_idx, device, baseline_acc):
     plt.close()
     return results
 
+def run_permutation_importance(model, dataset, val_idx, device, baseline_acc, n_repeats=5):
+    print("Analysis 3: Permutation Importance")
+    # 先收集所有驗證資料
+    all_data, all_labels = [], []
+    for idx in val_idx:
+        data, label = dataset[idx]
+        all_data.append(data.numpy())
+        all_labels.append(label.item())
+    all_data = np.array(all_data)
+    all_labels = np.array(all_labels)
+
+    results = {}
+    for group_name, indices in FEATURE_GROUPS.items():
+        drops = []
+        for _ in range(n_repeats):
+            perturbed_data = all_data.copy()
+            for dim_idx in indices:
+                perm = np.random.permutation(len(perturbed_data))
+                perturbed_data[:, :, dim_idx] = perturbed_data[perm, :, dim_idx]
+
+            batch = [(torch.tensor(d), torch.tensor(l)) for d, l in zip(perturbed_data, all_labels)]
+            loader = DataLoader(batch, batch_size=32, shuffle=False, collate_fn=collate_fn)
+            acc = evaluate_model(model, loader, device)
+            drops.append(baseline_acc - acc)
+
+        mean_drop = np.mean(drops)
+        std_drop = np.std(drops)
+        results[group_name] = {"mean_drop": mean_drop, "std_drop": std_drop}
+        print(f"  {group_name:<35} | 平均下降: {mean_drop:+.2%} (+/- {std_drop:.2%})")
+
+    plt.figure(figsize=(12, 14))
+    names = list(results.keys())
+    means = [results[n]["mean_drop"] * 100 for n in names]
+    stds = [results[n]["std_drop"] * 100 for n in names]
+    plt.barh(names, means, xerr=stds, color='lightgreen')
+    plt.title("排列重要性：打亂特徵後的準確率下降 (%)")
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "permutation_importance.png"))
+    plt.close()
+    return results
+
 def analyze_importance():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Beginning 72-dimensional feature importance analysis...")
@@ -250,10 +292,44 @@ def analyze_importance():
     baseline_acc = evaluate_model(model, val_loader, device)
     print(f"Baseline Accuracy: {baseline_acc:.2%}")
     
-    analyze_variance(dataset, val_idx)
-    run_ablation_study(model, dataset, val_idx, device, baseline_acc)
+    variances = analyze_variance(dataset, val_idx)
+    ablation_results = run_ablation_study(model, dataset, val_idx, device, baseline_acc)
+    perm_results = run_permutation_importance(model, dataset, val_idx, device, baseline_acc, n_repeats=5)
     
-    print(f"Analysis complete! Charts saved to {OUTPUT_DIR}/")
+    # 5. 產出綜合報告 (Markdown & JSON)
+    report_lines = [
+        "# TSL 手語特徵點重要性分析報告 (72維幾何特徵版)\n",
+        f"- 基線準確率: {baseline_acc:.2%}",
+        f"- 驗證集大小: {len(val_idx)} 筆",
+        "\n## 消融實驗結果\n",
+        "| 特徵點 | 遮蔽後準確率 | 下降幅度 | 重要性 |",
+        "|---|---|---|---|",
+    ]
+    for group_name, res in sorted(ablation_results.items(), key=lambda x: x[1]["drop"], reverse=True):
+        importance = "High" if res["drop"] > 0.05 else "Medium" if res["drop"] > 0.01 else "Low"
+        report_lines.append(f"| {group_name} | {res['masked_acc']:.2%} | {res['drop']:+.2%} | {importance} |")
+
+    report_lines.extend([
+        "\n## 排列重要性結果\n",
+        "| 特徵點 | 平均下降 | 標準差 | 重要性 |",
+        "|---|---|---|---|",
+    ])
+    for group_name, res in sorted(perm_results.items(), key=lambda x: x[1]["mean_drop"], reverse=True):
+        importance = "High" if res["mean_drop"] > 0.05 else "Medium" if res["mean_drop"] > 0.01 else "Low"
+        report_lines.append(f"| {group_name} | {res['mean_drop']:+.2%} | ±{res['std_drop']:.2%} | {importance} |")
+
+    with open(os.path.join(OUTPUT_DIR, "importance_report.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(report_lines))
+
+    summary = {
+        "baseline_acc": baseline_acc,
+        "ablation": ablation_results,
+        "permutation": perm_results
+    }
+    with open(os.path.join(OUTPUT_DIR, "importance_summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=4, ensure_ascii=False)
+
+    print(f"Analysis complete! Reports saved to {OUTPUT_DIR}/")
 
 if __name__ == "__main__":
     analyze_importance()
