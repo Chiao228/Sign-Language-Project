@@ -48,3 +48,5 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+
+!landmark_analysis_**/*.png

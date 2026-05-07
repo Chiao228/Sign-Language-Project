@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V23_Transformer_66(with asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V23_Transformer_72(with asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 66       # 66 (通常為雙手骨架點)
+INPUT_DIM = 72    
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_66"
+DATA_PATH = "sliding_window_72"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
