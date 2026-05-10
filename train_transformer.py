@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import interp1d
 from sklearn.metrics import confusion_matrix, f1_score, classification_report
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, StratifiedShuffleSplit
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V23_Transformer_66(with asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V24_Transformer_66(with asl weight+ sliding window + ShuffleSplit (5 runs & 70/30) + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -370,20 +370,20 @@ def main():
             json.dump(bp, f, indent=4, ensure_ascii=False)
         print(f"✅ 最佳參數已存至 {params_file}")
 
-    # C. 正式訓練 (改為 K-Fold 交叉驗證)
-    K_FOLDS = 5
-    skf = StratifiedKFold(n_splits=K_FOLDS, shuffle=True, random_state=42)
+    # C. 正式訓練 (改為 StratifiedShuffleSplit 7:3 跑 5 次)
+    NUM_RUNS = 5
+    sss = StratifiedShuffleSplit(n_splits=NUM_RUNS, test_size=0.3, random_state=42)
     
     all_fold_accuracies = []
     all_fold_f1_scores = []
     all_indices = np.arange(len(full_dataset.labels))
     all_labels = full_dataset.labels
 
-    print(f"\n🔍 Step 2: Final Training with {K_FOLDS}-Fold Cross Validation...")
+    print(f"\n🔍 Step 2: Final Training with 70/30 ShuffleSplit ({NUM_RUNS} runs)...")
 
-    for fold, (train_idx, val_idx) in enumerate(skf.split(all_indices, all_labels)):
+    for fold, (train_idx, val_idx) in enumerate(sss.split(all_indices, all_labels)):
         print(f"\n" + "="*40)
-        print(f"🚀 Training Fold {fold+1}/{K_FOLDS}")
+        print(f"🚀 Training Run {fold+1}/{NUM_RUNS} (70/30 Split)")
         print("="*40)
 
         # 建立該 Fold 的子資料夾
@@ -498,9 +498,9 @@ def main():
     std_acc = np.std(all_fold_accuracies)
     
     print("\n" + "⭐" * 30)
-    print(f"🏆 K-Fold Cross Validation Summary ({K_FOLDS} Folds)")
+    print(f"🏆 ShuffleSplit Summary ({NUM_RUNS} Runs)")
     for i, acc in enumerate(all_fold_accuracies):
-        print(f"   Fold {i+1}: {acc:.2%}")
+        print(f"   Run {i+1}: {acc:.2%}")
     print("-" * 30)
     print(f"   Average Accuracy: {avg_acc:.2%}")
     print(f"   Standard Deviation: {std_acc:.4f}")
