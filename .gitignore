@@ -22,7 +22,7 @@ landmark_analysis_*/
 scratch/
 *.png
 analyze_output.txt
-detection_report_*.md
+# detection_report_*.md
 video_count.md
 
 # Models & Weights

@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, Stratifie
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V24_Transformer_66(with asl weight+ sliding window + ShuffleSplit (5 runs & 70/30) + output F1-score)"
+OUTPUT_DIR = "train_V24_Transformer_66(with asl weight+ sliding window + ShuffleSplit (5 runs & 80/20) + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -264,10 +264,10 @@ def objective(trial):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = TSLDataset(DATA_PATH, target_frames=TARGET_FRAMES)
     
-    # 修改：依照需求調整為 70/30 切分 (test_size=0.3)
+    # 修改：依照需求調整為 80/20 切分 (test_size=0.2)
     train_idx, val_idx = train_test_split(
         np.arange(len(dataset.labels)), 
-        test_size=0.3, 
+        test_size=0.2, 
         stratify=dataset.labels, 
         random_state=42
     )
@@ -360,7 +360,7 @@ def main():
         with open(params_file, "r", encoding="utf-8") as f:
             bp = json.load(f)
     else:
-        print("🔍 Step 1: Hyperparameter Optimization (70/30 Split)...")
+        print("🔍 Step 1: Hyperparameter Optimization (80/20 Split)...")
         sampler = optuna.samplers.TPESampler(seed=42)
         study = optuna.create_study(direction="minimize", sampler=sampler)
         study.optimize(objective, n_trials=25)
@@ -370,24 +370,24 @@ def main():
             json.dump(bp, f, indent=4, ensure_ascii=False)
         print(f"✅ 最佳參數已存至 {params_file}")
 
-    # C. 正式訓練 (改為 StratifiedShuffleSplit 7:3 跑 5 次)
+    # C. 正式訓練 (改為 StratifiedShuffleSplit 8:2 跑 5 次)
     NUM_RUNS = 5
-    sss = StratifiedShuffleSplit(n_splits=NUM_RUNS, test_size=0.3, random_state=42)
+    sss = StratifiedShuffleSplit(n_splits=NUM_RUNS, test_size=0.2, random_state=42)
     
     all_fold_accuracies = []
     all_fold_f1_scores = []
     all_indices = np.arange(len(full_dataset.labels))
     all_labels = full_dataset.labels
 
-    print(f"\n🔍 Step 2: Final Training with 70/30 ShuffleSplit ({NUM_RUNS} runs)...")
+    print(f"\n🔍 Step 2: Final Training with 80/20 ShuffleSplit ({NUM_RUNS} runs)...")
 
     for fold, (train_idx, val_idx) in enumerate(sss.split(all_indices, all_labels)):
         print(f"\n" + "="*40)
-        print(f"🚀 Training Run {fold+1}/{NUM_RUNS} (70/30 Split)")
+        print(f"🚀 Training Run {fold+1}/{NUM_RUNS} (80/20 Split)")
         print("="*40)
 
         # 建立該 Fold 的子資料夾
-        FOLD_DIR = os.path.join(OUTPUT_DIR, f"Fold_{fold+1}")
+        FOLD_DIR = os.path.join(OUTPUT_DIR, f"Run_{fold+1}")
         os.makedirs(FOLD_DIR, exist_ok=True)
 
         train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=bp['batch_size'], shuffle=True, collate_fn=collate_fn)
