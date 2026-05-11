@@ -2,8 +2,8 @@
 """
 sliding_window_crop.py
 ======================
-滑窗裁切與過濾 (68D 版本 - 66D 座標 + 2D 幾何特徵)
-描述：此腳本使用固定長度的滑窗 (Sliding Window) 遍歷 68 維特徵序列。
+滑窗裁切與過濾 (74D 版本 - 66D 座標 + 8D 幾何特徵)
+描述：此腳本使用固定長度的滑窗 (Sliding Window) 遍歷 74 維特徵序列。
      若視窗內的平均動態能量高於門檻，則將其存為一個獨立的樣本。
 """
 
@@ -15,8 +15,8 @@ from pathlib import Path
 # ==========================================
 # 1. Hyperparameters & Paths
 # ==========================================
-SOURCE_DIR = Path("tsl_features_68")   # features_72.py 產出的 68 維資料
-OUTPUT_DIR = Path("sliding_window_68") # 滑窗產出的輸出地
+SOURCE_DIR = Path("tsl_features_74")   # features_72.py 產出的 74 維資料
+OUTPUT_DIR = Path("sliding_window_74") # 滑窗產出的輸出地
 
 WINDOW_SIZE = 30  # 視窗長度
 STRIDE = 15      # 步長 (重疊度)
@@ -29,20 +29,20 @@ def process_single_file(file_path, output_dir):
     try:
         features = np.load(file_path).astype(np.float32)
         N, D = features.shape
-        # 68 維度防護 (33+1 + 33+1)
-        if D != 68:
+        # 74 維度防護 (33+4 + 33+4)
+        if D != 74:
             return 0, f"無效格式(D:{D})"
         
         if N < WINDOW_SIZE:
-            # 如果不夠長，可以選擇補零或直接拉伸。這裡比照原架構，若太短則拉伸一次
-            resized = cv2.resize(features, (68, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
+            # 如果不夠長，可以選擇補零或直接拉伸。
+            resized = cv2.resize(features, (74, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
             save_path = output_dir / f"{file_path.stem}_full.npy"
             np.save(save_path, resized)
             return 1, "長度不足 WINDOW_SIZE，已拉伸存為單一檔案"
 
-        # 1. 重心偵測：僅使用座標部分 (左手 0:33, 右手 34:67，跳過 33 與 67 的幾何特徵)
+        # 1. 重心偵測：僅使用座標部分 (左手 0:33, 右手 37:70)
         lh_pts = features[:, 0:33].reshape(-1, 11, 3)
-        rh_pts = features[:, 34:67].reshape(-1, 11, 3)
+        rh_pts = features[:, 37:70].reshape(-1, 11, 3)
         lh_center = np.mean(lh_pts, axis=1) 
         rh_center = np.mean(rh_pts, axis=1)
         centers = np.hstack([lh_center, rh_center]) # (N, 6)
@@ -95,7 +95,7 @@ def process_single_file(file_path, output_dir):
 
 def main():
     print("=" * 60)
-    print("🚀 啟動 68 維滑窗裁切 (Sliding Window) 處理管線")
+    print("🚀 啟動 74 維滑窗裁切 (Sliding Window) 處理管線")
     print(f"⚙️  視窗大小: {WINDOW_SIZE}, 步長: {STRIDE}, 門檻: {ENERGY_THRESHOLD}")
     print("=" * 60)
     
@@ -118,7 +118,6 @@ def main():
     fail_count = 0
     
     for idx, file_path in enumerate(all_files, 1):
-        # 注意：滑窗可能會產出多個檔案，所以輸出路徑處理方式稍有不同
         relative_parent = file_path.relative_to(SOURCE_DIR).parent
         target_subdir = OUTPUT_DIR / relative_parent
         target_subdir.mkdir(parents=True, exist_ok=True)
@@ -143,3 +142,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
