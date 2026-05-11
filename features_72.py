@@ -9,11 +9,12 @@ from mediapipe.tasks.python.vision import (
     RunningMode, PoseLandmarksConnections, HandLandmarksConnections, drawing_utils
 )
 from scipy.signal import savgol_filter
+import csv
 
 # --- 設定路徑 ---
 VIDEO_SOURCE = "tsl"        
-DATA_PATH = "tsl_features_72"   # 更新路徑
-VIZ_PATH = "tsl_tracking_72"    # 更新視覺化路徑
+DATA_PATH = "tsl_features_68"   # 更新路徑
+VIZ_PATH = "tsl_tracking_68"    # 更新視覺化路徑
 MODEL_DIR = "models"
 HOLISTIC_MODEL_PATH = os.path.join(MODEL_DIR, "holistic_landmarker.task")
 
@@ -40,7 +41,7 @@ def extract_geometric_features(hand_norm_63):
     hand_norm_63: (63,) 平鋪陣列，其中 [0:3] 是手腕(相對身體)，其餘是相對手腕且縮放過的座標
     """
     if np.all(hand_norm_63 == 0):
-        return np.zeros(3)
+        return np.zeros(1)
     
     pts = hand_norm_63.reshape(21, 3)
     
@@ -48,27 +49,7 @@ def extract_geometric_features(hand_norm_63):
     # 由於 pts[4] 和 pts[8] 都是相對手腕的向量，其差值即為兩指尖位移
     ti_ed = np.linalg.norm(pts[4] - pts[8])
     
-    # 2. 指尖開合角 (Inter-finger Angle)
-    # 使用 8 (食指尖), 12 (中指尖) 相對於手腕的向量
-    v1 = pts[8]   
-    v2 = pts[12]  
-    norm1 = np.linalg.norm(v1)
-    norm2 = np.linalg.norm(v2)
-    cos_theta = np.dot(v1, v2) / (norm1 * norm2 + 1e-6)
-    angle = np.arccos(np.clip(cos_theta, -1.0, 1.0))
-    
-    # 4. 指尖到掌面距離 (Tip-to-Plane)
-    # 平面由 0 (手腕原點), 5 (食指根), 17 (小指根) 定義
-    p0 = np.zeros(3) 
-    p1 = pts[5]      
-    p2 = pts[17]     
-    v_a = p1 - p0
-    v_b = p2 - p0
-    normal = np.cross(v_a, v_b)
-    normal = normal / (np.linalg.norm(normal) + 1e-6)
-    dist_to_plane = np.abs(np.dot(pts[8] - p0, normal))
-    
-    return np.array([ti_ed, angle, dist_to_plane])
+    return np.array([ti_ed])
 
 # --- 3. 混合歸一化 ---
 def normalize_hand_local(lm_list, body_center=None, body_dist=1.0):
@@ -272,7 +253,7 @@ def process_video(video_path, save_path, viz_save_path, holistic_options):
         lh_norm_63 = normalize_hand_local([MockLM(p) for p in lh_pts], info["center"], info["dist"])
         rh_norm_63 = normalize_hand_local([MockLM(p) for p in rh_pts], info["center"], info["dist"])
         
-        # 2. 提取幾何特徵 (每隻手 3 維)
+        # 2. 提取幾何特徵 (每隻手 1 維：僅 TI-ED)
         lh_geo = extract_geometric_features(lh_norm_63)
         rh_geo = extract_geometric_features(rh_norm_63)
         
@@ -285,9 +266,9 @@ def process_video(video_path, save_path, viz_save_path, holistic_options):
         lh_pruned = lh_norm_63[keep_indices]
         rh_pruned = rh_norm_63[keep_indices]
         
-        # 4. 串接：(33 + 3) + (33 + 3) = 72 維
-        feat_72 = np.concatenate([lh_pruned, lh_geo, rh_pruned, rh_geo])
-        final_features_72.append(feat_72)
+        # 4. 串接：(33 + 1) + (33 + 1) = 68 維
+        feat_68 = np.concatenate([lh_pruned, lh_geo, rh_pruned, rh_geo])
+        final_features_72.append(feat_68)
 
         # 視覺化繪製 (略...)
         h, w, _ = frame.shape
@@ -315,19 +296,46 @@ def main():
         min_pose_detection_confidence=0.5,
         min_hand_landmarks_confidence=0.5
     )
-    print(f"=== 開始提取 72 維特徵 (66維座標 + 6維幾何特徵) ===")
-    for root, _, files in os.walk(VIDEO_SOURCE):
-        for file in files:
-            if file.lower().endswith(('.mp4', '.mkv')):
-                v_path = os.path.join(root, file)
-                rel_path = os.path.relpath(v_path, VIDEO_SOURCE)
-                s_path = os.path.join(DATA_PATH, os.path.splitext(rel_path)[0] + ".npy")
-                v_save_path = os.path.join(VIZ_PATH, os.path.splitext(rel_path)[0] + ".mp4")
-                if os.path.exists(s_path): continue
-                print(f"  [處理中] {file}...", end="", flush=True)
-                success, tot_f, det_f, rate = process_video(v_path, s_path, v_save_path, holistic_options)
-                if success: print(f" [OK] {rate:.1f}%")
-                else: print(" [失敗]")
+    os.makedirs(DATA_PATH, exist_ok=True)
+    report_path = os.path.join(DATA_PATH, "detection_rates_72.csv")
+    write_header = not os.path.exists(report_path)
+    
+    report_lines = ["# 68維特徵提取偵測報告 (66D座標 + 2D幾何)\n", "| 分類 | 影片名稱 | 偵測率 |", "| --- | --- | --- |"]
+    
+    print(f"=== 開始提取 68 維特徵 (66維座標 + 2維幾何特徵) ===")
+    
+    with open(report_path, mode='a', newline='', encoding='utf-8') as f_csv:
+        writer = csv.writer(f_csv)
+        if write_header:
+            writer.writerow(['Video', 'DetectionRate', 'TotalFrames', 'DetectedFrames'])
+            
+        for root, _, files in os.walk(VIDEO_SOURCE):
+            category = os.path.basename(root)
+            if category == os.path.basename(VIDEO_SOURCE) or category == "": category = "未分類"
+
+            for file in files:
+                if file.lower().endswith(('.mp4', '.mkv')):
+                    v_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(v_path, VIDEO_SOURCE)
+                    s_path = os.path.join(DATA_PATH, os.path.splitext(rel_path)[0] + ".npy")
+                    v_save_path = os.path.join(VIZ_PATH, os.path.splitext(rel_path)[0] + ".mp4")
+                    
+                    if os.path.exists(s_path): continue
+                    
+                    print(f"  [處理中] {file}...", end="", flush=True)
+                    success, tot_f, det_f, rate = process_video(v_path, s_path, v_save_path, holistic_options)
+                    
+                    if success: 
+                        print(f" [OK] {rate:.1f}%")
+                        writer.writerow([file, f"{rate:.2f}%", tot_f, det_f])
+                        f_csv.flush()
+                        report_lines.append(f"| {category} | {file} | {rate:.1f}% |")
+                    else: 
+                        print(" [失敗]")
+                        report_lines.append(f"| {category} | {file} | 失敗 |")
+    
+    with open("detection_report_68.md", "w", encoding="utf-8") as f_md:
+        f_md.write("\n".join(report_lines) + "\n")
     print("\n=== 處理完成 ===")
 
 if __name__ == "__main__":

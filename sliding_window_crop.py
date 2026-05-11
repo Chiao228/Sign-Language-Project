@@ -2,8 +2,8 @@
 """
 sliding_window_crop.py
 ======================
-滑窗裁切與過濾 (66D 版本 - 精簡手部特徵)
-描述：此腳本不再尋找單一動態區塊，而是使用固定長度的滑窗 (Sliding Window) 遍歷整個序列。
+滑窗裁切與過濾 (68D 版本 - 66D 座標 + 2D 幾何特徵)
+描述：此腳本使用固定長度的滑窗 (Sliding Window) 遍歷 68 維特徵序列。
      若視窗內的平均動態能量高於門檻，則將其存為一個獨立的樣本。
 """
 
@@ -15,8 +15,8 @@ from pathlib import Path
 # ==========================================
 # 1. Hyperparameters & Paths
 # ==========================================
-SOURCE_DIR = Path("tsl_features_138")   # features.py 產出的 66 維資料
-OUTPUT_DIR = Path("sliding_window_138") # 滑窗產出的輸出地
+SOURCE_DIR = Path("tsl_features_68")   # features_72.py 產出的 68 維資料
+OUTPUT_DIR = Path("sliding_window_68") # 滑窗產出的輸出地
 
 WINDOW_SIZE = 30  # 視窗長度
 STRIDE = 15      # 步長 (重疊度)
@@ -29,20 +29,20 @@ def process_single_file(file_path, output_dir):
     try:
         features = np.load(file_path).astype(np.float32)
         N, D = features.shape
-        # 66 維度防護
-        if D != 66:
+        # 68 維度防護 (33+1 + 33+1)
+        if D != 68:
             return 0, f"無效格式(D:{D})"
         
         if N < WINDOW_SIZE:
             # 如果不夠長，可以選擇補零或直接拉伸。這裡比照原架構，若太短則拉伸一次
-            resized = cv2.resize(features, (66, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
+            resized = cv2.resize(features, (68, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
             save_path = output_dir / f"{file_path.stem}_full.npy"
             np.save(save_path, resized)
             return 1, "長度不足 WINDOW_SIZE，已拉伸存為單一檔案"
 
-        # 1. 重心偵測：計算兩手重心 (手腕到指尖 共11點)
+        # 1. 重心偵測：僅使用座標部分 (左手 0:33, 右手 34:67，跳過 33 與 67 的幾何特徵)
         lh_pts = features[:, 0:33].reshape(-1, 11, 3)
-        rh_pts = features[:, 33:66].reshape(-1, 11, 3)
+        rh_pts = features[:, 34:67].reshape(-1, 11, 3)
         lh_center = np.mean(lh_pts, axis=1) 
         rh_center = np.mean(rh_pts, axis=1)
         centers = np.hstack([lh_center, rh_center]) # (N, 6)
@@ -95,7 +95,7 @@ def process_single_file(file_path, output_dir):
 
 def main():
     print("=" * 60)
-    print("🚀 啟動滑窗裁切 (Sliding Window) 處理管線")
+    print("🚀 啟動 68 維滑窗裁切 (Sliding Window) 處理管線")
     print(f"⚙️  視窗大小: {WINDOW_SIZE}, 步長: {STRIDE}, 門檻: {ENERGY_THRESHOLD}")
     print("=" * 60)
     

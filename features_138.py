@@ -397,7 +397,7 @@ def main():
                 print(" [失敗]")
                 report_lines.append(f"| {category} | {file} | 失敗 |")
 
-    with open("detection_report_double_norm.md", "w", encoding="utf-8") as f:
+    with open("detection_report_double_norm_138.md", "w", encoding="utf-8") as f:
         f.write("\n".join(report_lines) + "\n")
     print("\n=== 處理完成 ===")
 

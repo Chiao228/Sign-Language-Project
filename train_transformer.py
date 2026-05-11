@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, Stratifie
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V24_Transformer_66(with asl weight+ sliding window + ShuffleSplit (5 runs & 80/20) + output F1-score)"
+OUTPUT_DIR = "train_V25_Transformer_68(with asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 66       # 66 (通常為雙手骨架點)
+INPUT_DIM = 68       # 68 (66D 座標 + 2D 幾何特徵)
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_66"
+DATA_PATH = "sliding_window_68"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
@@ -370,24 +370,24 @@ def main():
             json.dump(bp, f, indent=4, ensure_ascii=False)
         print(f"✅ 最佳參數已存至 {params_file}")
 
-    # C. 正式訓練 (改為 StratifiedShuffleSplit 8:2 跑 5 次)
-    NUM_RUNS = 5
-    sss = StratifiedShuffleSplit(n_splits=NUM_RUNS, test_size=0.2, random_state=42)
+    # C. 正式訓練 (改為 K-Fold 交叉驗證)
+    K_FOLDS = 5
+    skf = StratifiedKFold(n_splits=K_FOLDS, shuffle=True, random_state=42)
     
     all_fold_accuracies = []
     all_fold_f1_scores = []
     all_indices = np.arange(len(full_dataset.labels))
     all_labels = full_dataset.labels
-
-    print(f"\n🔍 Step 2: Final Training with 80/20 ShuffleSplit ({NUM_RUNS} runs)...")
-
-    for fold, (train_idx, val_idx) in enumerate(sss.split(all_indices, all_labels)):
+    
+    print(f"\n🔍 Step 2: Final Training with {K_FOLDS}-Fold Cross Validation...")
+    
+    for fold, (train_idx, val_idx) in enumerate(skf.split(all_indices, all_labels)):
         print(f"\n" + "="*40)
-        print(f"🚀 Training Run {fold+1}/{NUM_RUNS} (80/20 Split)")
+        print(f"🚀 Training Fold {fold+1}/{K_FOLDS}")
         print("="*40)
 
         # 建立該 Fold 的子資料夾
-        FOLD_DIR = os.path.join(OUTPUT_DIR, f"Run_{fold+1}")
+        FOLD_DIR = os.path.join(OUTPUT_DIR, f"Fold_{fold+1}")
         os.makedirs(FOLD_DIR, exist_ok=True)
 
         train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=bp['batch_size'], shuffle=True, collate_fn=collate_fn)
@@ -498,9 +498,9 @@ def main():
     std_acc = np.std(all_fold_accuracies)
     
     print("\n" + "⭐" * 30)
-    print(f"🏆 ShuffleSplit Summary ({NUM_RUNS} Runs)")
+    print(f"🏆 K-Fold Cross Validation Summary ({K_FOLDS} Folds)")
     for i, acc in enumerate(all_fold_accuracies):
-        print(f"   Run {i+1}: {acc:.2%}")
+        print(f"   Fold {i+1}: {acc:.2%}")
     print("-" * 30)
     print(f"   Average Accuracy: {avg_acc:.2%}")
     print(f"   Standard Deviation: {std_acc:.4f}")
