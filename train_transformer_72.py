@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V23_Transformer_72(with asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V28_Transformer_72(with asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 

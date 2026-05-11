@@ -18,8 +18,8 @@ SOURCE_DIR = Path("tsl_features_72")   # features_72.py 產出的 72 維資料
 OUTPUT_DIR = Path("sliding_window_72") # 滑窗產出的輸出地
 
 WINDOW_SIZE = 30  # 視窗長度
-STRIDE = 15      # 步長 (重疊度)
-ENERGY_THRESHOLD = 0.05 # 視窗平均能量門檻
+STRIDE = 10      # 步長 (重疊度)
+ENERGY_THRESHOLD = 0.03 # 視窗平均能量門檻
 
 def process_single_file(file_path, output_dir):
     try:

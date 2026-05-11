@@ -12,13 +12,10 @@ from scipy.signal import savgol_filter
 
 # --- 設定路徑 ---
 VIDEO_SOURCE = "tsl"        
-DATA_PATH = "tsl_features_74"   # 已更新為 74
-VIZ_PATH = "tsl_tracking_74"    # 已更新為 74
+DATA_PATH = "tsl_features_72"   # 更新路徑
+VIZ_PATH = "tsl_tracking_72"    # 更新視覺化路徑
 MODEL_DIR = "models"
 HOLISTIC_MODEL_PATH = os.path.join(MODEL_DIR, "holistic_landmarker.task")
-
-class MockLM: 
-    def __init__(self, p): self.x, self.y, self.z = p[0], p[1], p[2]
 
 # --- 1. 下載模型函式 ---
 def download_models():
@@ -39,45 +36,39 @@ def download_models():
 # --- 2. 幾何特徵提取 ---
 def extract_geometric_features(hand_norm_63):
     """
-    從歸一化後的 63 維手部點位中提取 4 維幾何特徵
-    1. 拇指-食指尖距離 (TI-ED)
-    2. 指尖開合角 (Inter-finger Angle) - 食指與中指
-    3. 指尖到掌面距離 (Tip-to-Plane) - 食指尖到手掌平面
-    4. 大拇指曲率 (Thumb Curvature) - 區分「棒」與「謝謝」的關鍵
+    從歸一化後的 63 維手部點位中提取幾何特徵
+    hand_norm_63: (63,) 平鋪陣列，其中 [0:3] 是手腕(相對身體)，其餘是相對手腕且縮放過的座標
     """
     if np.all(hand_norm_63 == 0):
-        return np.zeros(4) 
+        return np.zeros(3)
     
     pts = hand_norm_63.reshape(21, 3)
     
     # 1. 拇指-食指尖距離 (TI-ED)
+    # 由於 pts[4] 和 pts[8] 都是相對手腕的向量，其差值即為兩指尖位移
     ti_ed = np.linalg.norm(pts[4] - pts[8])
     
     # 2. 指尖開合角 (Inter-finger Angle)
-    v1 = pts[8]   # 食指向量
-    v2 = pts[12]  # 中指向量
+    # 使用 8 (食指尖), 12 (中指尖) 相對於手腕的向量
+    v1 = pts[8]   
+    v2 = pts[12]  
     norm1 = np.linalg.norm(v1)
     norm2 = np.linalg.norm(v2)
     cos_theta = np.dot(v1, v2) / (norm1 * norm2 + 1e-6)
     angle = np.arccos(np.clip(cos_theta, -1.0, 1.0))
     
-    # 3. 指尖到掌面距離 (Tip-to-Plane)
-    p0 = np.zeros(3) # 手腕
-    p1 = pts[5]      # 食指根
-    p2 = pts[17]     # 小指根
+    # 4. 指尖到掌面距離 (Tip-to-Plane)
+    # 平面由 0 (手腕原點), 5 (食指根), 17 (小指根) 定義
+    p0 = np.zeros(3) 
+    p1 = pts[5]      
+    p2 = pts[17]     
     v_a = p1 - p0
     v_b = p2 - p0
     normal = np.cross(v_a, v_b)
     normal = normal / (np.linalg.norm(normal) + 1e-6)
     dist_to_plane = np.abs(np.dot(pts[8] - p0, normal))
     
-    # 4. 大拇指曲率 (Thumb Curvature)
-    v_thumb_a = pts[2] - pts[3]
-    v_thumb_b = pts[4] - pts[3]
-    cos_t = np.dot(v_thumb_a, v_thumb_b) / (np.linalg.norm(v_thumb_a) * np.linalg.norm(v_thumb_b) + 1e-6)
-    thumb_curv = np.arccos(np.clip(cos_t, -1.0, 1.0))
-    
-    return np.array([ti_ed, angle, dist_to_plane, thumb_curv])
+    return np.array([ti_ed, angle, dist_to_plane])
 
 # --- 3. 混合歸一化 ---
 def normalize_hand_local(lm_list, body_center=None, body_dist=1.0):
@@ -116,6 +107,9 @@ def get_extra_features_raw(pose_lm, face_lm):
     return np.array(pts)
 
 def robust_temporal_processing(data_array):
+    """ 
+    時序處理邏輯維持不變，但注意維度變為 138 (原始採樣維度)
+    """
     N, D = data_array.shape
     if N < 11: return data_array 
 
@@ -256,10 +250,13 @@ def process_video(video_path, save_path, viz_save_path, holistic_options):
             shoulder_params[i]["center"] = s_centers[i]
             shoulder_params[i]["dist"] = max(1e-6, s_dists[i])
 
-    # Phase 3: 歸一化 + 提取幾何特徵 + 繪製視覺化
-    final_features_74 = []
+    # Phase 3: 歸一化 + 提取幾何特徵
+    final_features_72 = []
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     
+    class MockLM: 
+        def __init__(self, p): self.x, self.y, self.z = p[0], p[1], p[2]
+
     for i in range(len(refined_raw_data)):
         success, frame = cap.read()
         if not success: break
@@ -275,11 +272,11 @@ def process_video(video_path, save_path, viz_save_path, holistic_options):
         lh_norm_63 = normalize_hand_local([MockLM(p) for p in lh_pts], info["center"], info["dist"])
         rh_norm_63 = normalize_hand_local([MockLM(p) for p in rh_pts], info["center"], info["dist"])
         
-        # 2. 提取幾何特徵 (每隻手 4 維)
+        # 2. 提取幾何特徵 (每隻手 3 維)
         lh_geo = extract_geometric_features(lh_norm_63)
         rh_geo = extract_geometric_features(rh_norm_63)
         
-        # 3. 保留精簡後的 11 個座標點 (33維 x 2 = 66維)
+        # 3. 保留原始的 11 個關鍵點 (33維)
         keep_points = [0, 3, 4, 7, 8, 11, 12, 15, 16, 19, 20]
         keep_indices = []
         for p in keep_points:
@@ -288,34 +285,23 @@ def process_video(video_path, save_path, viz_save_path, holistic_options):
         lh_pruned = lh_norm_63[keep_indices]
         rh_pruned = rh_norm_63[keep_indices]
         
-        # 4. 串接：(33 + 4) + (33 + 4) = 74 維
-        feat_74 = np.concatenate([lh_pruned, lh_geo, rh_pruned, rh_geo])
-        final_features_74.append(feat_74)
+        # 4. 串接：(33 + 3) + (33 + 3) = 72 維
+        feat_72 = np.concatenate([lh_pruned, lh_geo, rh_pruned, rh_geo])
+        final_features_72.append(feat_72)
 
-        # --- 視覺化繪製 ---
+        # 視覺化繪製 (略...)
         h, w, _ = frame.shape
         def to_px(p): return (int(p[0] * w), int(p[1] * h))
-        
         for pts, color in [(lh_pts, (0, 255, 0)), (rh_pts, (0, 0, 255))]:
             if np.any(pts):
                 for start, end in HAND_CONNS:
                     cv2.line(frame, to_px(pts[start]), to_px(pts[end]), color, 2)
                 for pt in pts:
-                    cv2.circle(frame, to_px(pt), 3, (255, 255, 255), -1)
-        
-        for pt in extra_pts[:2]:
-            if np.any(pt): cv2.circle(frame, to_px(pt), 4, (0, 255, 255), -1)
-            
-        l_sh_pt, r_sh_pt = extra_pts[2], extra_pts[3]
-        if np.any(l_sh_pt) or np.any(r_sh_pt):
-            cv2.line(frame, to_px(l_sh_pt), to_px(r_sh_pt), (255, 255, 0), 2)
-            cv2.circle(frame, to_px(l_sh_pt), 5, (255, 255, 0), -1)
-            cv2.circle(frame, to_px(r_sh_pt), 5, (255, 255, 0), -1)
-
+                    cv2.circle(frame, to_px(pt), 4, (255, 255, 255), -1)
         out.write(frame)
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    np.save(save_path, np.array(final_features_74))
+    np.save(save_path, np.array(final_features_72))
     cap.release(); out.release()
     
     final_rate = (active_detected_count / (last_hl_idx - first_hl_idx + 1)) * 100 if first_hl_idx != -1 else 0
@@ -329,37 +315,20 @@ def main():
         min_pose_detection_confidence=0.5,
         min_hand_landmarks_confidence=0.5
     )
-    
-    print(f"=== 開始提取 74 維特徵 (66維座標 + 8維幾何特徵) ===")
-    report_lines = ["# 74維特徵偵測報告 (含幾何特徵)\n", "| 分類 | 影片名稱 | 偵測率 | 狀態 |", "| --- | --- | --- | --- |"]
-    
+    print(f"=== 開始提取 72 維特徵 (66維座標 + 6維幾何特徵) ===")
     for root, _, files in os.walk(VIDEO_SOURCE):
-        category = os.path.basename(root)
-        if category == os.path.basename(VIDEO_SOURCE) or category == "": category = "未分類"
-
         for file in files:
             if file.lower().endswith(('.mp4', '.mkv')):
                 v_path = os.path.join(root, file)
                 rel_path = os.path.relpath(v_path, VIDEO_SOURCE)
                 s_path = os.path.join(DATA_PATH, os.path.splitext(rel_path)[0] + ".npy")
                 v_save_path = os.path.join(VIZ_PATH, os.path.splitext(rel_path)[0] + ".mp4")
-                
                 if os.path.exists(s_path): continue
-                
                 print(f"  [處理中] {file}...", end="", flush=True)
                 success, tot_f, det_f, rate = process_video(v_path, s_path, v_save_path, holistic_options)
-                
-                if success:
-                    print(f" [OK] {rate:.1f}%")
-                    report_lines.append(f"| {category} | {file} | {rate:.1f}% | ✅ |")
-                else:
-                    print(" [失敗]")
-                    report_lines.append(f"| {category} | {file} | 失敗 | ❌ |")
-
-    with open("detection_report_74.md", "w", encoding="utf-8") as f:
-        f.write("\n".join(report_lines) + "\n")
-        
-    print("\n=== 處理完成，偵測報告已生成至 detection_report_74.md ===")
+                if success: print(f" [OK] {rate:.1f}%")
+                else: print(" [失敗]")
+    print("\n=== 處理完成 ===")
 
 if __name__ == "__main__":
     main()
