@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, Stratifie
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V26_Transformer_74(with asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V27_Transformer_66(with asl weight+ sliding window + K-fold + output F1-score + parameter_asl)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 74       # 74 (66D 座標 + 8D 幾何特徵)
+INPUT_DIM = 66       # 與預訓練權重一致 (66)
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_74"
+DATA_PATH = "sliding_window_66"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
@@ -109,7 +109,7 @@ def collate_fn(batch):
 
 # --- 4. 模型架構 ---
 class CNNTransformerTSL(nn.Module):
-    def __init__(self, input_dim, num_classes, hidden_dim, num_layers, dropout):
+    def __init__(self, input_dim, num_classes, hidden_dim, num_layers, dropout, nhead=4):
         super(CNNTransformerTSL, self).__init__()
         # CNN 提取局部特徵
         self.cnn = nn.Sequential(
@@ -129,12 +129,13 @@ class CNNTransformerTSL(nn.Module):
         # [修改點] 更換為 Transformer
         encoder_layers = nn.TransformerEncoderLayer(
             d_model=hidden_dim, 
-            nhead=8, # 若 hidden_dim=128或256，皆可整除8
+            nhead=nhead, # 與預訓練權重一致 (4)
             dim_feedforward=hidden_dim * 2,
             dropout=dropout,
             batch_first=True
         )
-        self.transformer = nn.TransformerEncoder(encoder_layers, num_layers=num_layers)
+        # 為了與預訓練權重的 key 名稱對齊，改為 transformer_encoder
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=num_layers)
         
         # Transformer 沒有雙向的概念，因此輸出維度就是 hidden_dim
         self.fc = nn.Sequential(
@@ -153,7 +154,7 @@ class CNNTransformerTSL(nn.Module):
             x = x + self.pos_encoder[:, :x.size(1), :]
         
         # Transformer: (Batch, Frames, hidden_dim)
-        x = self.transformer(x)
+        x = self.transformer_encoder(x)
         
         # 結合 Mean 與 Max Pooling
         avg_pool = x.mean(dim=1)
@@ -253,8 +254,8 @@ def load_pretrained_weights(model, weights_path, device):
 
 # --- 6. Optuna 目標函式 ---
 def objective(trial):
-    h_dim = trial.suggest_categorical('hidden_dim', [128, 256])
-    n_layers = trial.suggest_int('num_layers', 1, 3) 
+    h_dim = trial.suggest_categorical('hidden_dim', [128])
+    n_layers = trial.suggest_categorical('num_layers', [2]) # 固定為 2 層以匹配權重
     lr = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
     batch_size = trial.suggest_categorical('batch_size', [16])
     dropout = trial.suggest_float('dropout', 0.5, 0.6)
@@ -274,7 +275,7 @@ def objective(trial):
     train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(Subset(dataset, val_idx), batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
-    model = CNNTransformerTSL(INPUT_DIM, len(dataset.label_map), h_dim, n_layers, dropout).to(device)
+    model = CNNTransformerTSL(INPUT_DIM, len(dataset.label_map), h_dim, n_layers, dropout, nhead=4).to(device)
     
     # 遷移學習：搜尋時也載入基礎權重
     load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
@@ -394,7 +395,7 @@ def main():
         val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=bp['batch_size'], shuffle=False, collate_fn=collate_fn)
 
         # 每次 Fold 都重新初始化模型與優化器
-        model = CNNTransformerTSL(INPUT_DIM, num_classes, bp['hidden_dim'], bp['num_layers'], bp['dropout']).to(device)
+        model = CNNTransformerTSL(INPUT_DIM, num_classes, bp['hidden_dim'], bp['num_layers'], bp['dropout'], nhead=4).to(device)
         
         # 加載預訓練權重
         loaded_count = load_pretrained_weights(model, PRETRAINED_WEIGHTS, device)
