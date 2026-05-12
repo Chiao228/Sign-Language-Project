@@ -15,10 +15,10 @@ import optuna
 from model_transformer import CNNTransformerTSL
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V31_Transformer_74(with new asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V32_Transformer_81(with new asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-PRETRAINED_WEIGHTS = "transformer_TSL_ARCH_74D_BS16_LR0.001_20260512_143030_best.pth" 
+PRETRAINED_WEIGHTS = "transformer_TSL_ARCH_81D_BS16_LR0.001_20260512_192749_best.pth" 
 
 plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 74    
+INPUT_DIM = 81    
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_74"
+DATA_PATH = "sliding_window_81"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
