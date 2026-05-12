@@ -75,7 +75,7 @@ def horizontal_flip_safe(data):
     dim = data.shape[1]
     
     # --- 步驟 A: X 座標鏡像 (僅針對座標類型的索引) ---
-    if dim in [66, 81, 138]:
+    if dim in [66, 81]:
         # 全員皆為 (x, y, z) 座標
         new_data[:, 0::3] = 1.0 - new_data[:, 0::3]
     elif dim == 72:
