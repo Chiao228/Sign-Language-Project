@@ -15,10 +15,10 @@ import optuna
 from model_transformer import CNNTransformerTSL
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V30_Transformer_72(with new asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V31_Transformer_74(with new asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-PRETRAINED_WEIGHTS = "transformer_TSL_ARCH_72D_BS16_LR0.001_20260512_130653_best.pth" 
+PRETRAINED_WEIGHTS = "transformer_TSL_ARCH_74D_BS16_LR0.001_20260512_143030_best.pth" 
 
 plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 72    
+INPUT_DIM = 74    
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_72"
+DATA_PATH = "sliding_window_74"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
@@ -189,7 +189,6 @@ def safe_save_model(state_dict, path):
 def load_pretrained_weights(model, weights_path, device):
     """
     自動載入預訓練權重，並跳過形狀不符的層 (例如分類層)。
-    同時處理從 transformer_encoder 重新命名為 transformer 的相容性。
     """
     if os.path.exists(weights_path):
         state_dict = torch.load(weights_path, map_location=device)
