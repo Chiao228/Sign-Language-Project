@@ -10,15 +10,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import interp1d
 from sklearn.metrics import confusion_matrix, f1_score, classification_report
-from sklearn.model_selection import train_test_split, StratifiedKFold, StratifiedShuffleSplit
+from sklearn.model_selection import train_test_split, StratifiedKFold
 import optuna
+from model_transformer import CNNTransformerTSL
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V29_Transformer_74(with asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V30_Transformer_72(with new asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
-#PRETRAINED_WEIGHTS = " " 
+PRETRAINED_WEIGHTS = "transformer_TSL_ARCH_72D_BS16_LR0.001_20260512_130653_best.pth" 
 
 plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 74       # 74 (66D 座標 + 8D 幾何特徵)
+INPUT_DIM = 72    
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_74"
+DATA_PATH = "sliding_window_72"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
@@ -107,58 +107,6 @@ def collate_fn(batch):
     data, labels = zip(*batch)
     return torch.stack(data), torch.stack(labels)
 
-# --- 4. 模型架構 ---
-class CNNTransformerTSL(nn.Module):
-    def __init__(self, input_dim, num_classes, hidden_dim, num_layers, dropout):
-        super(CNNTransformerTSL, self).__init__()
-        # CNN 提取局部特徵
-        self.cnn = nn.Sequential(
-            nn.Conv1d(input_dim, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(128, hidden_dim, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm1d(hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout)
-        )
-        
-        # Positional Encoding (針對時間序列的可學習位置編碼)
-        self.pos_encoder = nn.Parameter(torch.randn(1, 30, hidden_dim))
-        
-        # [修改點] 更換為 Transformer
-        encoder_layers = nn.TransformerEncoderLayer(
-            d_model=hidden_dim, 
-            nhead=8, # 若 hidden_dim=128或256，皆可整除8
-            dim_feedforward=hidden_dim * 2,
-            dropout=dropout,
-            batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layers, num_layers=num_layers)
-        
-        # Transformer 沒有雙向的概念，因此輸出維度就是 hidden_dim
-        self.fc = nn.Sequential(
-            nn.Linear(hidden_dim, 128), 
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(128, num_classes)
-        )
-
-    def forward(self, x):
-        # CNN: (Batch, Frames, Dim) -> (Batch, Dim, Frames)
-        x = self.cnn(x.transpose(1, 2)).transpose(1, 2)
-        
-        # 加入 Positional Encoding
-        if x.size(1) <= self.pos_encoder.size(1):
-            x = x + self.pos_encoder[:, :x.size(1), :]
-        
-        # Transformer: (Batch, Frames, hidden_dim)
-        x = self.transformer(x)
-        
-        # 結合 Mean 與 Max Pooling
-        avg_pool = x.mean(dim=1)
-        max_pool, _ = x.max(dim=1)
-        return self.fc(avg_pool + max_pool)
 
 # --- 5. 視覺化函式 ---
 def plot_comprehensive_report(history, y_true, y_pred, classes, folder, fold_num):
@@ -241,6 +189,7 @@ def safe_save_model(state_dict, path):
 def load_pretrained_weights(model, weights_path, device):
     """
     自動載入預訓練權重，並跳過形狀不符的層 (例如分類層)。
+    同時處理從 transformer_encoder 重新命名為 transformer 的相容性。
     """
     if os.path.exists(weights_path):
         state_dict = torch.load(weights_path, map_location=device)
@@ -253,8 +202,8 @@ def load_pretrained_weights(model, weights_path, device):
 
 # --- 6. Optuna 目標函式 ---
 def objective(trial):
-    h_dim = trial.suggest_categorical('hidden_dim', [128, 256])
-    n_layers = trial.suggest_int('num_layers', 1, 3) 
+    h_dim = trial.suggest_categorical('hidden_dim', [128])
+    n_layers = trial.suggest_categorical('num_layers', [2]) 
     lr = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
     batch_size = trial.suggest_categorical('batch_size', [16])
     dropout = trial.suggest_float('dropout', 0.5, 0.6)
@@ -378,9 +327,9 @@ def main():
     all_fold_f1_scores = []
     all_indices = np.arange(len(full_dataset.labels))
     all_labels = full_dataset.labels
-    
+
     print(f"\n🔍 Step 2: Final Training with {K_FOLDS}-Fold Cross Validation...")
-    
+
     for fold, (train_idx, val_idx) in enumerate(skf.split(all_indices, all_labels)):
         print(f"\n" + "="*40)
         print(f"🚀 Training Fold {fold+1}/{K_FOLDS}")
