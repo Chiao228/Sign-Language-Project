@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-sliding_window_crop_72.py
+sliding_window_crop.py
 ======================
-滑窗裁切與過濾 (72D 版本 - 66D 座標 + 6D 幾何特徵)
-描述：此腳本使用固定長度的滑窗遍歷 72 維特徵序列。
+滑窗裁切與過濾 (74D 版本 - 66D 座標 + 8D 幾何特徵)
+描述：此腳本使用固定長度的滑窗 (Sliding Window) 遍歷 74 維特徵序列。
+     若視窗內的平均動態能量高於門檻，則將其存為一個獨立的樣本。
 """
 
 import os
@@ -14,34 +15,34 @@ from pathlib import Path
 # ==========================================
 # 1. Hyperparameters & Paths
 # ==========================================
-SOURCE_DIR = Path("tsl_features_72")   # features_72.py 產出的 72 維資料
-OUTPUT_DIR = Path("sliding_window_72") # 滑窗產出的輸出地
+SOURCE_DIR = Path("tsl_features_74")   # features_72.py 產出的 74 維資料
+OUTPUT_DIR = Path("sliding_window_74") # 滑窗產出的輸出地
 
 WINDOW_SIZE = 30  # 視窗長度
 STRIDE = 10      # 步長 (重疊度)
-ENERGY_THRESHOLD = 0.03 # 視窗平均能量門檻
+ENERGY_THRESHOLD = 0.03 # 視窗平均能量門檻，過低視為靜態不存檔
 
 def process_single_file(file_path, output_dir):
+    """
+    處理單個檔案，將其切割成多個滑窗。
+    """
     try:
         features = np.load(file_path).astype(np.float32)
         N, D = features.shape
-        
-        # 72 維度防護
-        if D != 72:
+        # 74 維度防護 (33+4 + 33+4)
+        if D != 74:
             return 0, f"無效格式(D:{D})"
         
         if N < WINDOW_SIZE:
-            # 拉伸至 WINDOW_SIZE
-            resized = cv2.resize(features, (72, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
+            # 如果不夠長，可以選擇補零或直接拉伸。
+            resized = cv2.resize(features, (74, WINDOW_SIZE), interpolation=cv2.INTER_LINEAR)
             save_path = output_dir / f"{file_path.stem}_full.npy"
             np.save(save_path, resized)
-            return 1, "長度不足，已拉伸存為單一檔案"
+            return 1, "長度不足 WINDOW_SIZE，已拉伸存為單一檔案"
 
-        # 1. 重心偵測：僅使用座標部分 (0:33 與 36:69)
-        # 左手 11 點座標：0:33
-        # 右手 11 點座標：36:69
+        # 1. 重心偵測：僅使用座標部分 (左手 0:33, 右手 37:70)
         lh_pts = features[:, 0:33].reshape(-1, 11, 3)
-        rh_pts = features[:, 36:69].reshape(-1, 11, 3)
+        rh_pts = features[:, 37:70].reshape(-1, 11, 3)
         lh_center = np.mean(lh_pts, axis=1) 
         rh_center = np.mean(rh_pts, axis=1)
         centers = np.hstack([lh_center, rh_center]) # (N, 6)
@@ -65,12 +66,15 @@ def process_single_file(file_path, output_dir):
             
             avg_energy = np.mean(window_energy)
             
+            # 只有當能量高於門檻時才存檔
             if avg_energy >= ENERGY_THRESHOLD:
                 save_path = output_dir / f"{file_path.stem}_win{start_idx}.npy"
                 np.save(save_path, window_features)
                 saved_count += 1
         
+        # 如果整段都沒有超過門檻的視窗，但 N 足夠大，強迫取能量最高的一個
         if saved_count == 0:
+            # 找能量最高的一段
             max_energy_idx = 0
             max_e = -1
             for start_idx in range(0, N - WINDOW_SIZE + 1, STRIDE):
@@ -82,7 +86,7 @@ def process_single_file(file_path, output_dir):
             save_path = output_dir / f"{file_path.stem}_best.npy"
             np.save(save_path, features[max_energy_idx:max_energy_idx+WINDOW_SIZE])
             saved_count = 1
-            return saved_count, f"能量皆低於門檻，取出最高能量視窗"
+            return saved_count, f"能量皆低於門檻，強迫取出最高能量視窗 (MaxE:{max_e:.4f})"
 
         return saved_count, f"成功切出 {saved_count} 個視窗"
         
@@ -91,7 +95,8 @@ def process_single_file(file_path, output_dir):
 
 def main():
     print("=" * 60)
-    print("🚀 啟動 72 維滑窗裁切 (Sliding Window) 處理管線")
+    print("🚀 啟動 74 維滑窗裁切 (Sliding Window) 處理管線")
+    print(f"⚙️  視窗大小: {WINDOW_SIZE}, 步長: {STRIDE}, 門檻: {ENERGY_THRESHOLD}")
     print("=" * 60)
     
     if not SOURCE_DIR.exists():
@@ -99,6 +104,7 @@ def main():
         return
         
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
     all_files = list(SOURCE_DIR.rglob("*.npy"))
     total_files = len(all_files)
     
@@ -109,18 +115,28 @@ def main():
     print(f"📂 偵測到 {total_files} 個來源檔案...")
     
     total_saved = 0
+    fail_count = 0
+    
     for idx, file_path in enumerate(all_files, 1):
         relative_parent = file_path.relative_to(SOURCE_DIR).parent
         target_subdir = OUTPUT_DIR / relative_parent
         target_subdir.mkdir(parents=True, exist_ok=True)
         
         count, msg = process_single_file(file_path, target_subdir)
+        
         if count > 0:
             total_saved += count
             print(f"✅ [{idx:04d}/{total_files:04d}] {file_path.name:<20} | {msg}")
+        else:
+            fail_count += 1
+            print(f"⚠️  [{idx:04d}/{total_files:04d}] 處理失敗: {file_path.name} | 錯誤: {msg}")
             
     print("\n" + "=" * 60)
-    print(f"🎉 任務完成！產出視窗數: {total_saved}")
+    print(f"🎉 任務完成！")
+    print(f"原始檔案數: {total_files}")
+    print(f"產出視窗數: {total_saved}")
+    if fail_count > 0:
+        print(f"失敗檔案數: {fail_count}")
     print(f"📁 輸出目錄: {OUTPUT_DIR}")
     print("=" * 60)
 

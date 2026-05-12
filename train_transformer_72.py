@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import interp1d
 from sklearn.metrics import confusion_matrix, f1_score, classification_report
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, StratifiedShuffleSplit
 import optuna
 
 # --- 1. 環境與輸出資料夾設定 ---
-OUTPUT_DIR = "train_V28_Transformer_72(with asl weight+ sliding window + K-fold + output F1-score)"
+OUTPUT_DIR = "train_V29_Transformer_74(with asl weight+ sliding window + K-fold + output F1-score)"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PRETRAINED_WEIGHTS = "transformer_66_BS16_LR0.001_best.pth" 
@@ -48,9 +48,9 @@ except ImportError:
     print("⚠️ Warning: augment_data.py missing.")
 
 # --- 2. 固定參數 ---
-INPUT_DIM = 72    
+INPUT_DIM = 74       # 74 (66D 座標 + 8D 幾何特徵)
 TARGET_FRAMES = 30   
-DATA_PATH = "sliding_window_72"
+DATA_PATH = "sliding_window_74"
 
 # --- 3. 資料讀取器 ---
 class TSLDataset(Dataset):
@@ -264,10 +264,10 @@ def objective(trial):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = TSLDataset(DATA_PATH, target_frames=TARGET_FRAMES)
     
-    # 修改：依照需求調整為 70/30 切分 (test_size=0.3)
+    # 修改：依照需求調整為 80/20 切分 (test_size=0.2)
     train_idx, val_idx = train_test_split(
         np.arange(len(dataset.labels)), 
-        test_size=0.3, 
+        test_size=0.2, 
         stratify=dataset.labels, 
         random_state=42
     )
@@ -360,7 +360,7 @@ def main():
         with open(params_file, "r", encoding="utf-8") as f:
             bp = json.load(f)
     else:
-        print("🔍 Step 1: Hyperparameter Optimization (70/30 Split)...")
+        print("🔍 Step 1: Hyperparameter Optimization (80/20 Split)...")
         sampler = optuna.samplers.TPESampler(seed=42)
         study = optuna.create_study(direction="minimize", sampler=sampler)
         study.optimize(objective, n_trials=25)
@@ -378,9 +378,9 @@ def main():
     all_fold_f1_scores = []
     all_indices = np.arange(len(full_dataset.labels))
     all_labels = full_dataset.labels
-
+    
     print(f"\n🔍 Step 2: Final Training with {K_FOLDS}-Fold Cross Validation...")
-
+    
     for fold, (train_idx, val_idx) in enumerate(skf.split(all_indices, all_labels)):
         print(f"\n" + "="*40)
         print(f"🚀 Training Fold {fold+1}/{K_FOLDS}")
